@@ -35,11 +35,12 @@ const DEFAULT_COMPANY = {
   deuda_neta: '', multiplo_esperado: '', valoracion_estimada: '',
   empleados: '', plantas_capacidad: '', certificaciones: '', clientes_principales: '',
   concentracion_clientes: '', fortalezas: '', riesgos: '', sinergias: '',
-  valor_empresa_tx: '', multiplo_transaccion: '', capital_a_usar: '', deuda_adquisicion: '',
+  precio_acordado_vendedor: '', valor_empresa_tx: '', multiplo_transaccion: '', capital_a_usar: '', deuda_adquisicion: '',
   vendor_loan: '', venture_debt: '', earn_out: '', caja_objetivo: '', working_capital_objetivo: '',
   fees_transaccion: '', pct_equity: '', pct_deuda_bancaria: '', pct_vendor_loan: '', pct_venture_debt: '',
   tipo_deuda_bancaria: '', tipo_venture_debt: '', tipo_vendor_loan: '', conversion_ebitda_fcf: '',
   estructura_pago: '', condiciones_clave: '', riesgos_financiacion: '', capacidad_repago: '', tesis_impacto: '',
+  escenario_adquisicion_guardado: '', loi_borrador: '',
   plan_adquisicion: '', plan_100_dias: '',
   fuente_contacto: '', fecha_ultimo_contacto: '', proxima_accion: '', fecha_proxima_accion: '', notas: '',
   analisis_ia: '', documentos: [], actividades: []

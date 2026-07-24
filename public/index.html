@@ -166,11 +166,12 @@
     multiplo_esperado:"", valoracion_estimada:"",
     empleados:"", plantas_capacidad:"", certificaciones:"", clientes_principales:"", concentracion_clientes:"",
     fortalezas:"", riesgos:"", sinergias:"",
-    valor_empresa_tx:"", multiplo_transaccion:"", capital_a_usar:"", deuda_adquisicion:"",
+    precio_acordado_vendedor:"", valor_empresa_tx:"", multiplo_transaccion:"", capital_a_usar:"", deuda_adquisicion:"",
     vendor_loan:"", venture_debt:"", earn_out:"", caja_objetivo:"", working_capital_objetivo:"",
     fees_transaccion:"", pct_equity:"", pct_deuda_bancaria:"", pct_vendor_loan:"", pct_venture_debt:"",
     tipo_deuda_bancaria:"", tipo_venture_debt:"", tipo_vendor_loan:"", conversion_ebitda_fcf:"",
     estructura_pago:"", condiciones_clave:"", riesgos_financiacion:"", capacidad_repago:"", tesis_impacto:"",
+    escenario_adquisicion_guardado:"", loi_borrador:"",
     plan_adquisicion:"", plan_100_dias:"",
     fuente_contacto:"", fecha_ultimo_contacto:"", notas:"",
     proxima_accion:"", fecha_proxima_accion:"",
@@ -345,7 +346,7 @@
     const ebitda = parseNumber(rec.ebitda);
     const revenue = parseNumber(rec.facturacion_actual);
     const multiple = parseNumber(rec.multiplo_transaccion || rec.multiplo_esperado) || 4;
-    const ev = parseNumber(rec.valor_empresa_tx) || (ebitda ? ebitda * multiple : parseNumber(rec.valoracion_estimada));
+    const ev = parseNumber(rec.precio_acordado_vendedor) || parseNumber(rec.valor_empresa_tx) || (ebitda ? ebitda * multiple : parseNumber(rec.valoracion_estimada));
     const netDebt = parseNumber(rec.deuda_neta);
     const fees = parseNumber(rec.fees_transaccion) || (ev ? ev * 0.025 : 0);
     const fundingNeed = Math.max(ev - netDebt + fees, 0);
@@ -384,6 +385,47 @@
     if(vendorLoan) reasons.push(`Vendor loan ${formatNumber(vendorLoan)} M€ absorbe presión de caja inicial, pero acumula riesgo de refinanciación/negociación con vendedor.`);
     if(!ebitda || !ev) reasons.push('Faltan EBITDA normalizado o EV para emitir un juicio robusto.');
     return { ebitda, revenue, multiple, ev, netDebt, fees, fundingNeed, equity, bankDebt, vendorLoan, ventureDebt, bankRate, ventureRate, vendorRate, fcfConversion, fcf, cashInterest, pikInterest, totalDebt, seniorDebt, leverageSenior, leverageTotal, icr, paybackYears, level, verdict, reasons };
+  }
+
+  function scoreScenario(model){
+    const equityWeight = model.fundingNeed ? model.equity / model.fundingNeed : 1;
+    const repaymentPenalty = model.paybackYears > 5 ? (model.paybackYears - 5) * 12 : 0;
+    const leveragePenalty = model.leverageSenior > 2.5 ? (model.leverageSenior - 2.5) * 20 : 0;
+    const icrPenalty = model.icr < 3 ? (3 - model.icr) * 18 : 0;
+    const vendorPenalty = model.fundingNeed ? (model.vendorLoan / model.fundingNeed) * 4 : 0;
+    return equityWeight * 100 + repaymentPenalty + leveragePenalty + icrPenalty + vendorPenalty;
+  }
+
+  function optimizeAcquisitionStructure(baseRec){
+    const candidates = [];
+    const equityOptions = [0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60];
+    const bankOptions = [0.15,0.20,0.25,0.30,0.35,0.40,0.45];
+    const ventureOptions = [0,0.05,0.10,0.15];
+    equityOptions.forEach(eq=>{
+      bankOptions.forEach(bank=>{
+        ventureOptions.forEach(venture=>{
+          const vendor = 1 - eq - bank - venture;
+          if(vendor < 0 || vendor > 0.35) return;
+          const rec = Object.assign({}, baseRec, {
+            capital_a_usar:'', deuda_adquisicion:'', venture_debt:'', vendor_loan:'',
+            pct_equity:String(Math.round(eq*100)),
+            pct_deuda_bancaria:String(Math.round(bank*100)),
+            pct_venture_debt:String(Math.round(venture*100)),
+            pct_vendor_loan:String(Math.round(vendor*100))
+          });
+          const model = acquisitionModel(rec);
+          if(!model.ebitda || !model.ev) return;
+          if(model.level === 'bad') return;
+          candidates.push({ rec, model, score:scoreScenario(model) });
+        });
+      });
+    });
+    candidates.sort((a,b)=>a.score-b.score);
+    return candidates[0] || null;
+  }
+
+  function buildSavedScenario(model){
+    return `Precio acordado/EV: ${formatNumber(model.ev) || 'pendiente'} M€\nNecesidad de financiación: ${formatNumber(model.fundingNeed) || 'pendiente'} M€\nEquity: ${formatNumber(model.equity) || '—'} M€\nDeuda bancaria LBO: ${formatNumber(model.bankDebt) || '—'} M€\nVenture debt: ${formatNumber(model.ventureDebt) || '—'} M€\nVendor loan: ${formatNumber(model.vendorLoan) || '—'} M€\nSenior leverage: ${formatRatio(model.leverageSenior)}\nDeuda total / EBITDA: ${formatRatio(model.leverageTotal)}\nICR: ${formatRatio(model.icr)}\nRepago senior estimado: ${model.paybackYears >= 90 ? '>7 años' : model.paybackYears.toFixed(1).replace('.', ',') + ' años'}\nVeredicto: ${model.verdict}`;
   }
 
   function renderVerdict(model){
@@ -552,6 +594,65 @@
     current.tesis_impacto = current.tesis_impacto || 'Encaje pendiente de validar contra la tesis de roll-up: densidad de clientes alimentarios, potencial de compras centralizadas, capacidad productiva complementaria, certificaciones y disciplina de margen.';
     current.plan_adquisicion = `Recomendación de inversión: ${model.verdict}. EV ${formatNumber(model.ev) || 'pendiente'} M€ (${formatRatio(model.multiple)} EBITDA), necesidad de financiación ${formatNumber(model.fundingNeed) || 'pendiente'} M€. Estructura: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)}. Siguiente paso: no enviar LOI hasta cerrar QoE, deuda neta, working capital y capex recurrente.`;
     current.plan_100_dias = current.plan_100_dias || 'Día 0-30: control de caja diario, reporting EBITDA/FCF, contratos top clientes y auditoría de certificaciones. Día 31-60: capturar sinergias de compras, pricing y logística. Día 61-100: tablero mensual de covenants, plan comercial cross-sell y quick wins de capacidad/margen.';
+    dirty = true;
+    markDirty();
+    renderMain();
+  }
+
+  function applyModelToCurrent(model){
+    current.valor_empresa_tx = formatNumber(model.ev);
+    current.capital_a_usar = formatNumber(model.equity);
+    current.deuda_adquisicion = formatNumber(model.bankDebt);
+    current.venture_debt = formatNumber(model.ventureDebt);
+    current.vendor_loan = formatNumber(model.vendorLoan);
+    if(!current.fees_transaccion && model.fees) current.fees_transaccion = formatNumber(model.fees);
+  }
+
+  function handleOptimizeStructure(){
+    if(!current.precio_acordado_vendedor && current.valor_empresa_tx) current.precio_acordado_vendedor = current.valor_empresa_tx;
+    if(!current.tipo_deuda_bancaria) current.tipo_deuda_bancaria = '8';
+    if(!current.tipo_venture_debt) current.tipo_venture_debt = '12';
+    if(!current.tipo_vendor_loan) current.tipo_vendor_loan = '5';
+    if(!current.conversion_ebitda_fcf) current.conversion_ebitda_fcf = '45';
+    const best = optimizeAcquisitionStructure(current);
+    if(!best){
+      const model = acquisitionModel(current);
+      current.riesgos_financiacion = `No hay una estructura conservadora que repague con los datos actuales. Recomendación: renegociar precio, subir equity, ampliar vendor loan/earn-out o exigir más EBITDA normalizado antes de LOI. Diagnóstico actual: ${model.reasons.join(' ')}`;
+      current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
+      dirty = true;
+      markDirty();
+      renderMain();
+      return;
+    }
+    current.pct_equity = best.rec.pct_equity;
+    current.pct_deuda_bancaria = best.rec.pct_deuda_bancaria;
+    current.pct_venture_debt = best.rec.pct_venture_debt;
+    current.pct_vendor_loan = best.rec.pct_vendor_loan;
+    applyModelToCurrent(best.model);
+    current.estructura_pago = `Estructura optimizada para minimizar equity sin romper repago: ${current.pct_equity}% equity, ${current.pct_deuda_bancaria}% deuda bancaria LBO, ${current.pct_venture_debt}% venture debt y ${current.pct_vendor_loan}% vendor loan. Prioriza deuda cash-pay solo hasta mantener ICR y repago senior razonables; el vendor loan absorbe parte del precio sin tensionar caja inicial.`;
+    current.capacidad_repago = `${best.model.verdict}. ${best.model.reasons.join(' ')}`;
+    current.riesgos_financiacion = `La estructura elegida es la mejor dentro de los límites de repago configurados. Sensibilidades críticas: caída de EBITDA, menor conversión a FCF, capex de mantenimiento superior y retraso en sinergias. Si cualquiera aparece en QoE, reducir deuda bancaria/venture y desplazar precio a vendor loan o earn-out.`;
+    current.plan_adquisicion = `Mejor opción automática a partir del precio acordado: EV ${formatNumber(best.model.ev)} M€, financiado con equity ${formatNumber(best.model.equity)} M€, deuda bancaria ${formatNumber(best.model.bankDebt)} M€, venture debt ${formatNumber(best.model.ventureDebt) || '0,0'} M€ y vendor loan ${formatNumber(best.model.vendorLoan) || '0,0'} M€. Senior leverage ${formatRatio(best.model.leverageSenior)}, total leverage ${formatRatio(best.model.leverageTotal)}, ICR ${formatRatio(best.model.icr)} y repago senior estimado ${best.model.paybackYears.toFixed(1).replace('.', ',')} años. Recomendación: avanzar a LOI condicionada a QoE, deuda neta, working capital normalizado y confirmación de FCF.`;
+    current.escenario_adquisicion_guardado = buildSavedScenario(best.model);
+    dirty = true;
+    markDirty();
+    renderMain();
+  }
+
+  function handleSaveScenario(){
+    const model = acquisitionModel(current);
+    current.escenario_adquisicion_guardado = buildSavedScenario(model);
+    current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
+    dirty = true;
+    markDirty();
+    renderMain();
+  }
+
+  function handleGenerateLoi(){
+    const model = acquisitionModel(current);
+    const today = new Date().toISOString().slice(0,10);
+    current.escenario_adquisicion_guardado = current.escenario_adquisicion_guardado || buildSavedScenario(model);
+    current.loi_borrador = `BORRADOR DE CARTA DE INTENCIONES NO VINCULANTE\n\nFecha: ${today}\n\nA la atención de los accionistas de ${current.nombre || '[Nombre de la sociedad]'}\n\nEstimados señores,\n\nPor medio de la presente manifestamos nuestro interés no vinculante en adquirir una participación del 100% en ${current.nombre || '[la Sociedad]'}, sociedad especializada en ${current.segmento || '[segmento de envases alimentarios]'}, sujeta a la finalización satisfactoria de due diligence financiera, fiscal, legal, laboral, operativa y comercial.\n\n1. Precio y estructura económica\nEl valor empresa indicativo acordado como base de negociación asciende a ${formatNumber(model.ev) || '[●]'} M€. La estructura propuesta contempla una combinación de recursos propios, deuda bancaria LBO, venture debt y financiación del vendedor, con el siguiente mix indicativo:\n- Equity aportado por el comprador: ${formatNumber(model.equity) || '[●]'} M€\n- Deuda bancaria de adquisición: ${formatNumber(model.bankDebt) || '[●]'} M€\n- Venture debt: ${formatNumber(model.ventureDebt) || '0,0'} M€\n- Vendor loan subordinado: ${formatNumber(model.vendorLoan) || '[●]'} M€\n\nEl precio final se ajustará euro por euro por deuda neta, caja, working capital normalizado, capex pendiente y cualquier pasivo no registrado identificado durante la due diligence.\n\n2. Vendor loan y pagos diferidos\nEl vendor loan, en su caso, será subordinado a la deuda senior, con vencimiento y calendario de amortización a pactar, devengo de intereses indicativo del ${current.tipo_vendor_loan || '5'}% anual y sujeto a covenants de información y ausencia de incumplimientos relevantes.\n\n3. Condiciones principales\nLa operación estará condicionada a: (i) confirmación de EBITDA normalizado y conversión a caja; (ii) calidad y recurrencia de ingresos; (iii) concentración de clientes; (iv) vigencia de certificaciones alimentarias; (v) validación de deuda neta, caja y working capital objetivo; (vi) ausencia de contingencias materiales; y (vii) aprobación final de financiación.\n\n4. Due diligence y exclusividad\nSolicitamos un periodo de exclusividad de 60 días naturales desde la firma de esta carta, durante el cual la Sociedad facilitará acceso razonable a información financiera, fiscal, legal, comercial, operativa y medioambiental.\n\n5. Carácter no vinculante\nSalvo las obligaciones de confidencialidad, exclusividad, costes y ley aplicable que se pacten expresamente, esta carta no constituye una oferta vinculante ni obligación de completar la transacción. Cualquier obligación definitiva quedará sujeta a la firma de un contrato de compraventa.\n\n6. Racional estratégico\nNuestra tesis se basa en ${current.tesis_impacto || current.sinergias || 'la integración de la Sociedad en una plataforma de roll-up de envases alimentarios, capturando sinergias comerciales, operativas y de compras, preservando el equipo gestor y la relación con clientes clave'}.\n\nAtentamente,\n\n[Comprador]\n[Cargo]\n`;
     dirty = true;
     markDirty();
     renderMain();
@@ -806,9 +907,13 @@
           ${renderInstrumentGrid(model)}
           <div class="plan-actions">
             <button class="uploadbtn" id="generatePlanBtn">Generar estructura analista</button>
-            <span class="hint">Ajusta porcentajes e intereses por instrumento. La app normaliza el mix y calcula repago, leverage e ICR con conversión EBITDA→FCF.</span>
+            <button class="uploadbtn" id="optimizeStructureBtn">Optimizar uso de recursos</button>
+            <button class="uploadbtn" id="saveScenarioBtn">Guardar escenario</button>
+            <button class="uploadbtn" id="generateLoiBtn">Generar LOI</button>
+            <span class="hint">Introduce el precio pactado con el vendedor. La app busca el mix menos dilutivo que siga siendo financiable y deja una LOI editable.</span>
           </div>
           <div class="grid">
+            ${field('precio_acordado_vendedor','Precio fijado con vendedor / EV acordado (M€)', {mono:true})}
             ${field('valor_empresa_tx','Valor empresa / EV (M€)', {mono:true})}
             ${field('multiplo_transaccion','Múltiplo de la transacción (x EBITDA)', {mono:true})}
             ${field('fees_transaccion','Fees y costes transacción (M€)', {mono:true})}
@@ -845,6 +950,8 @@
             ${field('condiciones_clave','Condiciones clave para LOI / SPA', {wide:true, type:'textarea'})}
             ${field('riesgos_financiacion','Riesgos de financiación', {wide:true, type:'textarea'})}
             ${field('plan_adquisicion','Plan de adquisición generado', {wide:true, type:'textarea'})}
+            ${field('escenario_adquisicion_guardado','Escenario guardado para comité / LOI', {wide:true, type:'textarea'})}
+            ${field('loi_borrador','LOI editable para enviar al vendedor', {wide:true, type:'textarea'})}
             ${field('plan_100_dias','Plan 100 días post-cierre', {wide:true, type:'textarea'})}
           </div>
         </div>
@@ -885,6 +992,12 @@
     if(addNotaBtn) addNotaBtn.addEventListener('click', handleAddNota);
     const generatePlanBtn = document.getElementById('generatePlanBtn');
     if(generatePlanBtn) generatePlanBtn.addEventListener('click', handleGeneratePlan);
+    const optimizeStructureBtn = document.getElementById('optimizeStructureBtn');
+    if(optimizeStructureBtn) optimizeStructureBtn.addEventListener('click', handleOptimizeStructure);
+    const saveScenarioBtn = document.getElementById('saveScenarioBtn');
+    if(saveScenarioBtn) saveScenarioBtn.addEventListener('click', handleSaveScenario);
+    const generateLoiBtn = document.getElementById('generateLoiBtn');
+    if(generateLoiBtn) generateLoiBtn.addEventListener('click', handleGenerateLoi);
   }
 
   function markDirty(){
