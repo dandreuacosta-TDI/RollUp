@@ -1,0 +1,18 @@
+{
+  "name": "pipeline-rollup-envases",
+  "version": "1.0.0",
+  "description": "Sistema de screening M&A para roll-up de envases y embalajes alimentarios",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.2.0",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pipeline · Roll-up Envases Alimentarios</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAFAF7; --paper-dim:#F1EEE5; --ink:#1E2A22; --ink-dim:#5B6A5F; --line:#DAD5C4;
+    --glass:#2B4C3F; --glass-dim:#3E6753; --kraft:#A6672E; --kraft-dim:#C98A4C;
+    --tin:#48628C; --tin-dim:#7C93B8; --danger:#A23B2E;
+    --font-display:'Fraunces', serif; --font-body:'Inter', sans-serif; --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  #app{ font-family:var(--font-body); color:var(--ink); background:var(--paper); min-height:100vh; display:flex; flex-direction:column; }
+  .topbar{ padding:22px 28px 18px; border-bottom:2px solid var(--ink); display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:14px; }
+  .brand h1{ font-family:var(--font-display); font-weight:600; font-size:26px; margin:0 0 2px; letter-spacing:-0.01em; }
+  .brand .sub{ font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--glass-dim); }
+  .stats{ display:flex; gap:22px; font-family:var(--font-mono); }
+  .stat{ text-align:right; }
+  .stat .n{ font-size:22px; font-weight:600; color:var(--glass); display:block; line-height:1;}
+  .stat .l{ font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-dim);}
+  .body{ display:flex; flex:1; min-height:0; }
+  .sidebar{ width:320px; border-right:2px solid var(--ink); display:flex; flex-direction:column; background:var(--paper-dim); }
+  .sidebar-tools{ padding:14px 16px 10px; border-bottom:1px solid var(--line); display:flex; gap:8px; }
+  .sidebar-tools input{ flex:1; padding:8px 10px; border:1px solid var(--line); background:var(--paper); font-family:var(--font-body); font-size:13px; color:var(--ink); }
+  .sidebar-tools select{ padding:8px 6px; border:1px solid var(--line); background:var(--paper); font-size:12px; color:var(--ink); max-width:110px; }
+  .newbtn{ margin:12px 16px; padding:10px 12px; background:var(--glass); color:var(--paper); border:none; font-family:var(--font-mono); font-size:12px; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
+  .newbtn:hover{ background:var(--glass-dim); }
+  .list{ flex:1; overflow-y:auto; padding:0 0 16px; }
+  .card{ margin:0 12px 8px; padding:10px 12px; border:1px solid var(--line); background:var(--paper); cursor:pointer; position:relative; }
+  .card:hover{ border-color:var(--glass); }
+  .card.active{ border:2px solid var(--glass); background:#fff; }
+  .card .cname{ font-family:var(--font-display); font-size:15px; font-weight:600; margin-bottom:3px; padding-right:60px; }
+  .card .cmeta{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-dim); }
+  .stamp{ position:absolute; top:9px; right:10px; font-family:var(--font-mono); font-size:8.5px; letter-spacing:.05em; text-transform:uppercase; padding:2px 6px; border:1.5px solid currentColor; border-radius:2px; transform:rotate(-3deg); font-weight:600; }
+  .empty-list{ padding:24px 20px; font-size:12.5px; color:var(--ink-dim); line-height:1.6; }
+  .main{ flex:1; overflow-y:auto; padding:26px 34px 60px; }
+  .placeholder{ max-width:480px; margin:60px auto; text-align:center; color:var(--ink-dim); }
+  .placeholder .glyph{ font-family:var(--font-display); font-size:52px; color:var(--line); margin-bottom:10px; }
+  .placeholder h2{ font-family:var(--font-display); color:var(--ink); font-weight:600; }
+  .start-upload{ max-width:720px; margin:42px auto; text-align:left; border:2px solid var(--ink); background:#fff; padding:22px; box-shadow:8px 8px 0 var(--paper-dim); }
+  .start-upload h2{ font-family:var(--font-display); color:var(--ink); font-weight:600; margin:0 0 6px; font-size:28px; }
+  .start-upload p{ margin:0 0 18px; color:var(--ink-dim); line-height:1.55; }
+  .start-upload .upload-box{ margin-top:0; }
+  .detail-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:18px; padding-bottom:16px; border-bottom:2px solid var(--ink); }
+  .detail-head input.name-input{ font-family:var(--font-display); font-size:26px; font-weight:600; border:none; background:transparent; color:var(--ink); width:100%; padding:0; }
+  .detail-head input.name-input:focus{ outline:none; border-bottom:1px solid var(--glass);}
+  .headbtns{ display:flex; gap:8px; flex-shrink:0; }
+  .iconbtn{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding:8px 12px; border:1px solid var(--ink); background:var(--paper); color:var(--ink); cursor:pointer; }
+  .iconbtn:hover{ background:var(--ink); color:var(--paper); }
+  .iconbtn.danger{ border-color:var(--danger); color:var(--danger); }
+  .iconbtn.danger:hover{ background:var(--danger); color:#fff; }
+  .tabs{ display:flex; gap:8px; border-bottom:1px solid var(--line); margin:-4px 0 22px; }
+  .tabbtn{ border:1px solid var(--line); border-bottom:none; background:var(--paper-dim); color:var(--ink-dim); padding:10px 14px; font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; }
+  .tabbtn:hover{ color:var(--ink); border-color:var(--glass); }
+  .tabbtn.active{ background:#fff; color:var(--glass); border-color:var(--ink); transform:translateY(1px); }
+  .tab-panel{ display:none; }
+  .tab-panel.active{ display:block; }
+  .section{ margin-bottom:26px; }
+  .section .stitle{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--kraft); border-bottom:1px solid var(--line); padding-bottom:6px; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .stitle .num{ color:var(--line); font-weight:600; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(210px,1fr)); gap:14px; }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field.wide{ grid-column:1/-1; }
+  .field label{ font-size:11px; color:var(--ink-dim); font-weight:600; }
+  .field input, .field select, .field textarea{ padding:8px 9px; border:1px solid var(--line); background:#fff; font-family:var(--font-body); font-size:13.5px; color:var(--ink); resize:vertical; }
+  .field input:focus, .field select:focus, .field textarea:focus{ outline:none; border-color:var(--glass); }
+  .field textarea{ min-height:64px; line-height:1.4; }
+  .field.mono input{ font-family:var(--font-mono); }
+  select{ appearance:none; }
+  .upload-box{ border:1.5px dashed var(--line); background:var(--paper-dim); padding:14px; margin-top:12px; }
+  .upload-box.upload-disabled{ color:var(--ink-dim); font-size:12.5px; font-style:italic; }
+  .upload-label{ display:block; font-size:11px; font-weight:600; color:var(--ink-dim); margin-bottom:8px; }
+  .upload-row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .upload-row input[type=file]{ font-family:var(--font-body); font-size:12.5px; flex:1; min-width:180px; }
+  .uploadbtn{ background:var(--kraft); color:#fff; border:none; padding:9px 16px; font-family:var(--font-mono); font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; }
+  .uploadbtn:hover{ background:var(--kraft-dim); }
+  .uploadbtn:disabled{ opacity:.6; cursor:wait; }
+  .upload-msg{ margin-top:8px; font-size:12px; color:var(--glass-dim); font-family:var(--font-mono); }
+  .doclist{ margin-top:14px; border-top:1px solid var(--line); padding-top:10px; }
+  .docitem{ padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+  .docitem:last-child{ border-bottom:none; }
+  .doctag{ display:inline-block; font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; background:var(--glass); color:#fff; padding:2px 6px; margin-right:8px; }
+  .docname{ font-weight:600; margin-right:8px; }
+  .docdate{ font-family:var(--font-mono); color:var(--ink-dim); font-size:11px; }
+  .docresumen{ margin-top:4px; color:var(--ink-dim); font-size:12px; }
+  .deal-summary{ display:grid; grid-template-columns:repeat(4, minmax(130px,1fr)); gap:10px; margin:0 0 16px; }
+  .metric{ border:1px solid var(--line); background:#fff; padding:12px; }
+  .metric .mlabel{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:6px; }
+  .metric .mvalue{ font-family:var(--font-display); font-size:24px; color:var(--glass); line-height:1; }
+  .metric .msub{ font-family:var(--font-mono); font-size:10px; color:var(--ink-dim); margin-top:6px; }
+  .plan-actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 16px; }
+  .hint{ font-size:12px; color:var(--ink-dim); line-height:1.5; }
+  .crm-box{ border:1px solid var(--line); background:#fff; padding:14px; }
+  .crm-add{ display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
+  .crm-add textarea{ flex:1; padding:8px 9px; border:1px solid var(--line); font-family:var(--font-body); font-size:13px; min-height:44px; resize:vertical; }
+  .timeline{ display:flex; flex-direction:column; gap:0; }
+  .tlitem{ display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; align-items:baseline; flex-wrap:wrap; }
+  .tlitem:last-child{ border-bottom:none; }
+  .tldate{ font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); min-width:78px; }
+  .tltype{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; background:var(--tin); color:#fff; padding:1px 6px; }
+  .tltype.tldoc{ background:var(--kraft); }
+  .tltext{ flex:1; }
+  .savebar{ position:sticky; bottom:0; background:var(--paper); border-top:1px solid var(--line); padding:12px 0 0; margin-top:10px; display:flex; justify-content:space-between; align-items:center; font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); }
+  .savebtn{ background:var(--glass); color:var(--paper); border:none; padding:11px 22px; font-family:var(--font-mono); font-size:12px; text-transform:uppercase; letter-spacing:.05em; cursor:pointer; }
+  .savebtn:hover{ background:var(--glass-dim); }
+  .savebtn.saved{ background:var(--tin); }
+  ::-webkit-scrollbar{ width:9px; }
+  ::-webkit-scrollbar-thumb{ background:var(--line); }
+  @media (max-width:760px){
+    .body{ flex-direction:column; }
+    .sidebar{ width:100%; border-right:none; border-bottom:2px solid var(--ink); max-height:280px; }
+    .deal-summary{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+  const STATUS_OPTS = ["Screening inicial","Contactada","NDA firmado","Info recibida","En análisis","LOI","Prioritaria","Descartada"];
+  const STATUS_COLOR = {
+    "Screening inicial":"var(--ink-dim)", "Contactada":"var(--tin)", "NDA firmado":"var(--tin-dim)",
+    "Info recibida":"var(--glass-dim)", "En análisis":"var(--glass)", "LOI":"var(--kraft)",
+    "Prioritaria":"var(--kraft)", "Descartada":"var(--danger)"
+  };
+  const SEGMENTOS = ["Rígidos plástico","Flexibles","Vidrio","Metal","Papel/Cartón","Multi-material","Bio/Compostable","Otro"];
+  const PRIORIDADES = ["Alta","Media","Baja","Sin definir"];
+  const TIPOS_DOCUMENTO = ["Teaser","Cuentas anuales","NDA","Informe comercial","CIM","Otro"];
+
+  const FIELD_DEFS = {
+    id:null, nombre:"", estado:"Screening inicial", prioridad:"Sin definir",
+    pais_region:"", anio_fundacion:"", segmento:"", web:"", propietario:"", motivo_venta:"",
+    facturacion_actual:"", facturacion_historico:"", ebitda:"", margen_ebitda:"", deuda_neta:"",
+    multiplo_esperado:"", valoracion_estimada:"",
+    empleados:"", plantas_capacidad:"", certificaciones:"", clientes_principales:"", concentracion_clientes:"",
+    fortalezas:"", riesgos:"", sinergias:"",
+    valor_empresa_tx:"", multiplo_transaccion:"", capital_a_usar:"", deuda_adquisicion:"",
+    vendor_loan:"", earn_out:"", caja_objetivo:"", working_capital_objetivo:"",
+    fees_transaccion:"", estructura_pago:"", condiciones_clave:"", riesgos_financiacion:"",
+    plan_adquisicion:"", plan_100_dias:"",
+    fuente_contacto:"", fecha_ultimo_contacto:"", notas:"",
+    proxima_accion:"", fecha_proxima_accion:"",
+    analisis_ia:"",
+    documentos:[], actividades:[]
+  };
+  let analyzing = false;
+  let analyzeMsg = "";
+  let docTipoSeleccionado = "Otro";
+  let notaBorrador = "";
+
+  let index = [];
+  let current = null;
+  let filterText = "";
+  let filterEstado = "";
+  let dirty = false;
+  let activeTab = "screening";
+
+  const app = document.getElementById('app');
+  function uid(){ return 'c' + Date.now() + Math.random().toString(36).slice(2,7); }
+
+  async function loadIndex(){
+    try{
+      const r = await fetch('/api/companies');
+      index = await r.json();
+    }catch(e){ index = []; }
+  }
+  async function loadCompany(id){
+    try{
+      const r = await fetch('/api/companies/' + id);
+      if(!r.ok) return null;
+      return await r.json();
+    }catch(e){ return null; }
+  }
+  async function saveCompany(rec){
+    const r = await fetch('/api/companies', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(rec)
+    });
+    return await r.json();
+  }
+  async function deleteCompanyApi(id){
+    await fetch('/api/companies/' + id, { method:'DELETE' });
+  }
+
+  function escapeHtml(s){
+    return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render(){
+    const filtered = index.filter(e=>{
+      const matchText = !filterText || (e.nombre||'').toLowerCase().includes(filterText.toLowerCase());
+      const matchEstado = !filterEstado || e.estado===filterEstado;
+      return matchText && matchEstado;
+    }).sort((a,b)=> (b.updated||'').localeCompare(a.updated||''));
+
+    const stats = {};
+    index.forEach(e=>{ stats[e.estado]=(stats[e.estado]||0)+1; });
+    const prioritarias = index.filter(e=>e.estado==='Prioritaria').length;
+
+    app.innerHTML = `
+      <div class="topbar">
+        <div class="brand">
+          <h1>Pipeline · Roll-up Envases Alimentarios</h1>
+          <div class="sub">Sistema de screening M&amp;A · ${index.length} empresas registradas</div>
+        </div>
+        <div class="stats">
+          <div class="stat"><span class="n">${index.length}</span><span class="l">Total</span></div>
+          <div class="stat"><span class="n">${prioritarias}</span><span class="l">Prioritarias</span></div>
+          <div class="stat"><span class="n">${stats['En análisis']||0}</span><span class="l">En análisis</span></div>
+        </div>
+      </div>
+      <div class="body">
+        <div class="sidebar">
+          <div class="sidebar-tools">
+            <input id="search" type="text" placeholder="Buscar empresa..." value="${escapeHtml(filterText)}"/>
+            <select id="filterEstado">
+              <option value="">Todos</option>
+              ${STATUS_OPTS.map(s=>`<option value="${s}" ${filterEstado===s?'selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <button class="newbtn" id="newBtn">+ Nueva desde cero</button>
+          <div class="list" id="list">
+            ${filtered.length===0 ? `<div class="empty-list">${index.length===0 ? 'Todavía no hay empresas cargadas. Sube un documento en el panel principal o crea una ficha desde cero.' : 'Sin resultados para ese filtro.'}</div>` :
+              filtered.map(e=>`
+                <div class="card ${current&&current.id===e.id?'active':''}" data-id="${e.id}">
+                  <div class="cname">${escapeHtml(e.nombre)}</div>
+                  <div class="cmeta">${escapeHtml(e.segmento||'Segmento sin definir')}</div>
+                  <div class="stamp" style="color:${STATUS_COLOR[e.estado]||'var(--ink-dim)'}">${e.estado}</div>
+                </div>
+              `).join('')
+            }
+          </div>
+        </div>
+        <div class="main" id="main"></div>
+      </div>
+    `;
+
+    document.getElementById('search').addEventListener('input', e=>{ filterText=e.target.value; render(); });
+    document.getElementById('filterEstado').addEventListener('change', e=>{ filterEstado=e.target.value; render(); });
+    document.getElementById('newBtn').addEventListener('click', createNew);
+    document.querySelectorAll('.card').forEach(c=>{
+      c.addEventListener('click', ()=>openCompany(c.dataset.id));
+    });
+    renderMain();
+  }
+
+  function createNew(){
+    current = Object.assign({}, FIELD_DEFS, {id: uid()});
+    activeTab = "screening";
+    dirty = true;
+    render();
+  }
+
+  async function openCompany(id){
+    const rec = await loadCompany(id);
+    if(rec){
+      current = Object.assign({}, FIELD_DEFS, rec);
+      activeTab = "screening";
+      dirty = false;
+      render();
+    }
+  }
+
+  function filenameToCompanyName(name){
+    return (name || 'Nueva target')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || 'Nueva target';
+  }
+
+  function parseNumber(value){
+    const cleaned = (value || '').toString().replace(',', '.').match(/-?\d+(\.\d+)?/);
+    return cleaned ? Number(cleaned[0]) : 0;
+  }
+
+  function formatNumber(value){
+    if(!Number.isFinite(value) || value <= 0) return '';
+    return value.toFixed(1).replace('.', ',');
+  }
+
+  function metric(label, value, sub){
+    return `<div class="metric"><div class="mlabel">${label}</div><div class="mvalue">${escapeHtml(value || '—')}</div>${sub ? `<div class="msub">${escapeHtml(sub)}</div>` : ''}</div>`;
+  }
+
+  function field(key, label, opts){
+    opts = opts || {};
+    const val = escapeHtml(current[key] || '');
+    const wide = opts.wide ? ' wide' : '';
+    const mono = opts.mono ? ' mono' : '';
+    const id = 'field-' + key;
+    if(opts.type==='select'){
+      return `<div class="field${wide}">
+        <label for="${id}">${label}</label>
+        <select id="${id}" data-key="${key}">
+          ${(opts.options||[]).map(o=>`<option value="${escapeHtml(o)}" ${current[key]===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>`;
+    }
+    if(opts.type==='textarea'){
+      return `<div class="field${wide}">
+        <label for="${id}">${label}</label>
+        <textarea id="${id}" data-key="${key}" placeholder="${opts.placeholder||''}">${val}</textarea>
+      </div>`;
+    }
+    return `<div class="field${wide}${mono}">
+      <label for="${id}">${label}</label>
+      <input id="${id}" data-key="${key}" type="text" value="${val}" placeholder="${opts.placeholder||''}"/>
+    </div>`;
+  }
+
+  function renderDocumentsBox(){
+    const isSaved = index.some(e=>e.id===current.id);
+    if(!isSaved){
+      return `<div class="upload-box upload-disabled">
+        Guarda la ficha primero para poder subir y analizar documentos.
+      </div>`;
+    }
+    const docs = (current.documentos||[]).slice().reverse();
+    return `<div class="upload-box">
+      <label class="upload-label">Subir documento (PDF, Excel o CSV) — teaser, CIM, cuentas anuales, informe...</label>
+      <div class="upload-row">
+        <select id="docTipo">
+          ${TIPOS_DOCUMENTO.map(t=>`<option value="${t}" ${docTipoSeleccionado===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <input type="file" id="docFile" accept=".pdf,.xlsx,.xls,.csv"/>
+        <button class="uploadbtn" id="analyzeBtn" ${analyzing?'disabled':''}>${analyzing ? 'Analizando...' : 'Analizar con IA'}</button>
+      </div>
+      ${analyzeMsg ? `<div class="upload-msg">${escapeHtml(analyzeMsg)}</div>` : ''}
+      ${docs.length ? `<div class="doclist">
+        ${docs.map(d=>`<div class="docitem">
+          <span class="doctag">${escapeHtml(d.tipo)}</span>
+          <span class="docname">${escapeHtml(d.nombre)}</span>
+          <span class="docdate">${escapeHtml(d.fecha)}</span>
+          ${d.resumen ? `<div class="docresumen">${escapeHtml(d.resumen)}</div>` : ''}
+        </div>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }
+
+  async function analyzeFileForCurrent(file, tipo){
+    docTipoSeleccionado = tipo;
+    analyzing = true;
+    analyzeMsg = '';
+    renderMain();
+    try{
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('tipo', docTipoSeleccionado);
+      const r = await fetch('/api/companies/' + current.id + '/analyze-document', { method:'POST', body: fd });
+      const data = await r.json();
+      if(!r.ok){
+        analyzeMsg = 'Error: ' + (data.message || 'no se pudo analizar el archivo.');
+      } else {
+        current = Object.assign({}, FIELD_DEFS, data);
+        analyzeMsg = 'Análisis completado — revisa y ajusta los campos si hace falta.';
+        await loadIndex();
+      }
+    }catch(e){
+      analyzeMsg = 'Error de conexión al analizar el archivo.';
+    }
+    analyzing = false;
+    renderMain();
+  }
+
+  async function handleAnalyze(){
+    const fileInput = document.getElementById('docFile');
+    const tipoSelect = document.getElementById('docTipo');
+    if(!fileInput.files.length){
+      analyzeMsg = 'Selecciona primero un archivo.';
+      renderMain();
+      return;
+    }
+    await analyzeFileForCurrent(fileInput.files[0], tipoSelect.value);
+  }
+
+  async function handleFirstDocumentUpload(){
+    const fileInput = document.getElementById('startDocFile');
+    const tipoSelect = document.getElementById('startDocTipo');
+    if(!fileInput.files.length){
+      analyzeMsg = 'Selecciona primero un PDF, Excel o CSV.';
+      renderMain();
+      return;
+    }
+    const file = fileInput.files[0];
+    current = Object.assign({}, FIELD_DEFS, {
+      id: uid(),
+      nombre: filenameToCompanyName(file.name),
+      estado: 'En análisis'
+    });
+    activeTab = 'screening';
+    dirty = false;
+    await saveCompany(current);
+    await loadIndex();
+    await analyzeFileForCurrent(file, tipoSelect.value);
+  }
+
+  function handleGeneratePlan(){
+    const ebitda = parseNumber(current.ebitda);
+    const multiple = parseNumber(current.multiplo_transaccion || current.multiplo_esperado);
+    const netDebt = parseNumber(current.deuda_neta);
+    let enterpriseValue = parseNumber(current.valor_empresa_tx);
+    if(!enterpriseValue && ebitda && multiple){
+      enterpriseValue = ebitda * multiple;
+      current.valor_empresa_tx = formatNumber(enterpriseValue);
+    }
+    if(!current.multiplo_transaccion && current.multiplo_esperado){
+      current.multiplo_transaccion = current.multiplo_esperado;
+    }
+    const equityPrice = Math.max(enterpriseValue - netDebt, 0);
+    if(equityPrice && !parseNumber(current.vendor_loan)) current.vendor_loan = formatNumber(equityPrice * 0.20);
+    if(enterpriseValue && !parseNumber(current.deuda_adquisicion)) current.deuda_adquisicion = formatNumber(enterpriseValue * 0.35);
+    const vendorLoan = parseNumber(current.vendor_loan);
+    const acquisitionDebt = parseNumber(current.deuda_adquisicion);
+    const earnOut = parseNumber(current.earn_out);
+    if(equityPrice){
+      current.capital_a_usar = formatNumber(Math.max(equityPrice - vendorLoan - acquisitionDebt - earnOut, 0));
+    }
+    current.estructura_pago = current.estructura_pago || 'Pago inicial con equity del comprador y deuda de adquisición, complementado con vendor loan subordinado sujeto a permanencia y garantías estándar.';
+    current.condiciones_clave = current.condiciones_clave || 'Confirmar EBITDA normalizado, deuda neta/caja al cierre, working capital objetivo, concentración de clientes, capex recurrente y vigencia de certificaciones alimentarias.';
+    current.riesgos_financiacion = current.riesgos_financiacion || 'Riesgo de sobrepagar si el EBITDA no es recurrente, tensión de caja por integración, dependencia de clientes principales y posible necesidad de capex para capacidad/certificaciones.';
+    current.plan_adquisicion = `Plan base generado con los datos disponibles: EV ${current.valor_empresa_tx || 'pendiente'} M€, múltiplo ${current.multiplo_transaccion || 'pendiente'}x, vendor loan ${current.vendor_loan || 'pendiente'} M€, deuda de adquisición ${current.deuda_adquisicion || 'pendiente'} M€ y capital a usar ${current.capital_a_usar || 'pendiente'} M€. Validar estos importes contra QoE, deuda neta y working capital antes de LOI.`;
+    current.plan_100_dias = current.plan_100_dias || 'Día 0-30: confirmar reporting financiero, contratos clave y mapa de certificaciones. Día 31-60: integrar compras, pricing y control de márgenes. Día 61-100: plan comercial cross-sell, sinergias productivas y tablero mensual de KPIs.';
+    dirty = true;
+    markDirty();
+    renderMain();
+  }
+
+  function renderActivityBox(){
+    const isSaved = index.some(e=>e.id===current.id);
+    if(!isSaved){
+      return `<div class="upload-box upload-disabled">Guarda la ficha primero para poder registrar seguimiento.</div>`;
+    }
+    const acts = (current.actividades||[]).slice().sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+    return `<div class="crm-box">
+      <div class="crm-add">
+        <textarea id="notaInput" placeholder="Ej: Llamada con el propietario, pide más tiempo para enviar cuentas 2025...">${escapeHtml(notaBorrador)}</textarea>
+        <button class="uploadbtn" id="addNotaBtn">Añadir nota</button>
+      </div>
+      <div class="timeline">
+        ${acts.length===0 ? '<div class="empty-list" style="padding:8px 0;">Sin actividad registrada todavía.</div>' :
+          acts.map(a=>`<div class="tlitem">
+            <span class="tldate">${escapeHtml(a.fecha||'')}</span>
+            <span class="tltype ${a.tipo==='documento'?'tldoc':''}">${a.tipo==='documento'?'Documento':'Nota'}</span>
+            <span class="tltext">${escapeHtml(a.texto||'')}</span>
+          </div>`).join('')
+        }
+      </div>
+    </div>`;
+  }
+
+  async function handleAddNota(){
+    const input = document.getElementById('notaInput');
+    const texto = input.value.trim();
+    if(!texto) return;
+    notaBorrador = '';
+    try{
+      const r = await fetch('/api/companies/' + current.id + '/activities', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ texto })
+      });
+      const data = await r.json();
+      if(r.ok){
+        current = Object.assign({}, FIELD_DEFS, data);
+      }
+    }catch(e){}
+    renderMain();
+  }
+
+  function renderMain(){
+    const main = document.getElementById('main');
+    if(!current){
+      main.innerHTML = `
+        <div class="start-upload">
+          <h2>Empieza subiendo el documento de la target</h2>
+          <p>Sube primero el teaser, CIM, cuentas o PDF recibido. La aplicación creará una ficha provisional y, si la clave de Claude está configurada, organizará automáticamente la información de la empresa.</p>
+          <div class="upload-box">
+            <label class="upload-label">Documento inicial para organizar la ficha</label>
+            <div class="upload-row">
+              <select id="startDocTipo">
+                ${TIPOS_DOCUMENTO.map(t=>`<option value="${t}" ${docTipoSeleccionado===t?'selected':''}>${t}</option>`).join('')}
+              </select>
+              <input type="file" id="startDocFile" accept=".pdf,.xlsx,.xls,.csv"/>
+              <button class="uploadbtn" id="startAnalyzeBtn" ${analyzing?'disabled':''}>${analyzing ? 'Analizando...' : 'Crear ficha desde documento'}</button>
+            </div>
+            ${analyzeMsg ? `<div class="upload-msg">${escapeHtml(analyzeMsg)}</div>` : ''}
+          </div>
+          <p class="hint" style="margin-top:14px;">También puedes usar “Nueva desde cero” en la barra lateral si todavía no tienes documentación.</p>
+        </div>
+      `;
+      const startAnalyzeBtn = document.getElementById('startAnalyzeBtn');
+      if(startAnalyzeBtn) startAnalyzeBtn.addEventListener('click', handleFirstDocumentUpload);
+      return;
+    }
+    main.innerHTML = `
+      <div class="detail-head">
+        <input class="name-input" id="nameInput" type="text" value="${escapeHtml(current.nombre)}" placeholder="Nombre de la empresa"/>
+        <div class="headbtns">
+          <button class="iconbtn danger" id="delBtn">Eliminar</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tabbtn ${activeTab==='screening'?'active':''}" data-tab="screening">Ficha de screening</button>
+        <button class="tabbtn ${activeTab==='acquisition'?'active':''}" data-tab="acquisition">Plan de adquisición</button>
+      </div>
+
+      <div class="tab-panel ${activeTab==='screening'?'active':''}">
+
+      <div class="section">
+        <div class="stitle"><span class="num">01</span> Identificación</div>
+        <div class="grid">
+          ${field('pais_region','País / región', {placeholder:'ej. Cataluña, España'})}
+          ${field('anio_fundacion','Año de fundación', {mono:true})}
+          ${field('segmento','Segmento', {type:'select', options:SEGMENTOS})}
+          ${field('web','Web', {placeholder:'https://'})}
+          ${field('propietario','Propietario / accionariado', {wide:true, placeholder:'Familiar, PE, fundador único...'})}
+          ${field('motivo_venta','Motivo de venta', {wide:true, placeholder:'Sucesión, jubilación, desinversión de fondo...'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">02</span> Financieros</div>
+        <div class="grid">
+          ${field('facturacion_actual','Facturación último año (M€)', {mono:true})}
+          ${field('ebitda','EBITDA (M€)', {mono:true})}
+          ${field('margen_ebitda','Margen EBITDA (%)', {mono:true})}
+          ${field('deuda_neta','Deuda neta (M€)', {mono:true})}
+          ${field('multiplo_esperado','Múltiplo esperado (x EBITDA)', {mono:true})}
+          ${field('valoracion_estimada','Valoración estimada (M€)', {mono:true})}
+          ${field('facturacion_historico','Histórico facturación (últimos 3 años)', {wide:true, type:'textarea', placeholder:'2023: ... / 2024: ... / 2025: ...'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">03</span> Operativa</div>
+        <div class="grid">
+          ${field('empleados','Nº empleados', {mono:true})}
+          ${field('concentracion_clientes','Concentración top-3 clientes (%)', {mono:true})}
+          ${field('plantas_capacidad','Plantas y capacidad productiva', {wide:true, type:'textarea'})}
+          ${field('certificaciones','Certificaciones (BRC, IFS, FSC, ISO 22000...)', {wide:true})}
+          ${field('clientes_principales','Clientes principales', {wide:true, type:'textarea'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">04</span> Estrategia</div>
+        <div class="grid">
+          ${field('fortalezas','Fortalezas', {wide:true, type:'textarea'})}
+          ${field('riesgos','Riesgos / red flags', {wide:true, type:'textarea'})}
+          ${field('sinergias','Sinergias potenciales con la plataforma', {wide:true, type:'textarea'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">05</span> Estado y seguimiento</div>
+        <div class="grid">
+          ${field('estado','Estado', {type:'select', options:STATUS_OPTS})}
+          ${field('prioridad','Prioridad', {type:'select', options:PRIORIDADES})}
+          ${field('fuente_contacto','Fuente / contacto del deal', {placeholder:'Banquero, referido, inbound...'})}
+          ${field('fecha_ultimo_contacto','Fecha último contacto', {mono:true, placeholder:'AAAA-MM-DD'})}
+          ${field('proxima_accion','Próxima acción', {wide:true, placeholder:'Ej. Pedir cuentas 2025, agendar llamada...'})}
+          ${field('fecha_proxima_accion','Fecha próxima acción', {mono:true, placeholder:'AAAA-MM-DD'})}
+          ${field('notas','Notas libres', {wide:true, type:'textarea'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">06</span> Documentos y análisis IA</div>
+        ${renderDocumentsBox()}
+        <div class="grid" style="margin-top:14px;">
+          ${field('analisis_ia','Histórico de insights IA', {wide:true, type:'textarea', placeholder:'Sube un documento arriba para generar insights automáticamente. Cada análisis se añade aquí con fecha.'})}
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">07</span> Seguimiento del deal (CRM)</div>
+        ${renderActivityBox()}
+      </div>
+
+      </div>
+
+      <div class="tab-panel ${activeTab==='acquisition'?'active':''}">
+        <div class="section">
+          <div class="stitle"><span class="num">A1</span> Resumen de transacción</div>
+          <div class="deal-summary">
+            ${metric('EV / valor empresa', current.valor_empresa_tx ? current.valor_empresa_tx + ' M€' : '', 'Enterprise value')}
+            ${metric('Múltiplo', current.multiplo_transaccion ? current.multiplo_transaccion + 'x' : '', 'EV / EBITDA')}
+            ${metric('Capital a usar', current.capital_a_usar ? current.capital_a_usar + ' M€' : '', 'Equity cheque estimado')}
+            ${metric('Vendor loan', current.vendor_loan ? current.vendor_loan + ' M€' : '', 'Financiación vendedor')}
+          </div>
+          <div class="plan-actions">
+            <button class="uploadbtn" id="generatePlanBtn">Generar plan base</button>
+            <span class="hint">Usa EBITDA, deuda neta y múltiplo para proponer EV, vendor loan, deuda y capital. Después ajusta manualmente antes de guardar.</span>
+          </div>
+          <div class="grid">
+            ${field('valor_empresa_tx','Valor empresa / EV (M€)', {mono:true})}
+            ${field('multiplo_transaccion','Múltiplo de la transacción (x EBITDA)', {mono:true})}
+            ${field('capital_a_usar','Capital a usar / equity cheque (M€)', {mono:true})}
+            ${field('deuda_adquisicion','Deuda de adquisición (M€)', {mono:true})}
+            ${field('vendor_loan','Vendor loan a aplicar (M€)', {mono:true})}
+            ${field('earn_out','Earn-out / pago diferido (M€)', {mono:true})}
+            ${field('caja_objetivo','Caja objetivo al cierre (M€)', {mono:true})}
+            ${field('working_capital_objetivo','Working capital objetivo (M€)', {mono:true})}
+            ${field('fees_transaccion','Fees y costes transacción (M€)', {mono:true})}
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="stitle"><span class="num">A2</span> Estructura y condiciones</div>
+          <div class="grid">
+            ${field('estructura_pago','Estructura de pago', {wide:true, type:'textarea', placeholder:'Equity inicial, deuda senior, vendor loan, earn-out, retenciones...'})}
+            ${field('condiciones_clave','Condiciones clave para LOI / SPA', {wide:true, type:'textarea'})}
+            ${field('riesgos_financiacion','Riesgos de financiación', {wide:true, type:'textarea'})}
+            ${field('plan_adquisicion','Plan de adquisición generado', {wide:true, type:'textarea'})}
+            ${field('plan_100_dias','Plan 100 días post-cierre', {wide:true, type:'textarea'})}
+          </div>
+        </div>
+      </div>
+
+      <div class="savebar">
+        <span id="statusMsg">${dirty? 'Cambios sin guardar' : 'Guardado'}</span>
+        <button class="savebtn" id="saveBtn">Guardar ficha</button>
+      </div>
+    `;
+
+    document.getElementById('nameInput').addEventListener('input', e=>{ current.nombre=e.target.value; dirty=true; markDirty(); });
+    main.querySelectorAll('[data-key]').forEach(el=>{
+      el.addEventListener('input', e=>{ current[e.target.dataset.key]=e.target.value; dirty=true; markDirty(); });
+      el.addEventListener('change', e=>{ current[e.target.dataset.key]=e.target.value; dirty=true; markDirty(); });
+    });
+    document.getElementById('saveBtn').addEventListener('click', doSave);
+    document.getElementById('delBtn').addEventListener('click', doDelete);
+    main.querySelectorAll('.tabbtn').forEach(btn=>{
+      btn.addEventListener('click', e=>{ activeTab=e.target.dataset.tab; renderMain(); });
+    });
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    if(analyzeBtn) analyzeBtn.addEventListener('click', handleAnalyze);
+    const addNotaBtn = document.getElementById('addNotaBtn');
+    if(addNotaBtn) addNotaBtn.addEventListener('click', handleAddNota);
+    const generatePlanBtn = document.getElementById('generatePlanBtn');
+    if(generatePlanBtn) generatePlanBtn.addEventListener('click', handleGeneratePlan);
+  }
+
+  function markDirty(){
+    const msg = document.getElementById('statusMsg');
+    if(msg) msg.textContent = 'Cambios sin guardar';
+    const btn = document.getElementById('saveBtn');
+    if(btn) btn.classList.remove('saved');
+  }
+
+  async function doSave(){
+    if(!current.nombre || !current.nombre.trim()){ current.nombre = '(sin nombre)'; }
+    await saveCompany(current);
+    await loadIndex();
+    dirty = false;
+    render();
+    const msg = document.getElementById('statusMsg');
+    if(msg) msg.textContent = 'Guardado ✓';
+  }
+
+  async function doDelete(){
+    if(!confirm('¿Eliminar esta ficha de forma permanente?')) return;
+    await deleteCompanyApi(current.id);
+    await loadIndex();
+    current = null;
+    render();
+  }
+
+  (async function init(){
+    await loadIndex();
+    render();
+  })();
+})();
+</script>
+</body>
+</html>
