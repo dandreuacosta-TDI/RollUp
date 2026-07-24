@@ -78,7 +78,7 @@ git push -u origin main
 
 1. Entra en https://railway.app y haz login con tu cuenta de GitHub.
 2. **New Project → Deploy from GitHub repo** → selecciona el repo que acabas de subir.
-3. Railway detecta automáticamente que es Node.js (por el `package.json`) y usa `npm install` + `npm start`.
+3. Railway usará el `Dockerfile` incluido para construir la app con Node 20 y ejecutar `npm start`. Esto evita depender del builder automático de Railway/Railpack.
 4. En **Variables**, añade `ANTHROPIC_API_KEY` con tu clave de https://console.anthropic.com/settings/keys
    para que funcione el análisis automático de cuentas anuales.
 5. **Importante — persistencia de datos:** por defecto, el sistema de archivos de Railway se reinicia
@@ -96,6 +96,8 @@ git push -u origin main
 ```
 ├── server.js          # API REST + servidor de archivos estáticos
 ├── package.json
+├── Dockerfile          # Build explícita para Railway
+├── railway.json        # Fuerza builder DOCKERFILE en Railway
 ├── .gitignore
 ├── public/
 │   └── index.html      # Toda la interfaz (sin frameworks, JS plano)
