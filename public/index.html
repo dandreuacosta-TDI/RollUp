@@ -93,6 +93,31 @@
   .metric .mlabel{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:6px; }
   .metric .mvalue{ font-family:var(--font-display); font-size:24px; color:var(--glass); line-height:1; }
   .metric .msub{ font-family:var(--font-mono); font-size:10px; color:var(--ink-dim); margin-top:6px; }
+  .verdict{ border:2px solid var(--line); background:#fff; padding:16px; margin:0 0 16px; display:grid; grid-template-columns:220px 1fr; gap:16px; align-items:start; }
+  .verdict.good{ border-color:var(--glass); box-shadow:6px 6px 0 rgba(43,76,63,.12); }
+  .verdict.watch{ border-color:var(--kraft); box-shadow:6px 6px 0 rgba(166,103,46,.12); }
+  .verdict.bad{ border-color:var(--danger); box-shadow:6px 6px 0 rgba(162,59,46,.10); }
+  .verdict-label{ font-family:var(--font-mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:8px; }
+  .verdict-title{ font-family:var(--font-display); font-size:28px; line-height:1; margin:0 0 8px; }
+  .verdict.good .verdict-title{ color:var(--glass); }
+  .verdict.watch .verdict-title{ color:var(--kraft); }
+  .verdict.bad .verdict-title{ color:var(--danger); }
+  .verdict p{ margin:0 0 6px; color:var(--ink-dim); line-height:1.5; font-size:13px; }
+  .instrument-grid{ display:grid; grid-template-columns:repeat(4, minmax(130px,1fr)); gap:10px; margin-bottom:16px; }
+  .instrument{ border:1px solid var(--line); background:#fff; padding:12px; }
+  .instrument strong{ display:block; font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:8px; }
+  .instrument .amount{ font-family:var(--font-display); font-size:22px; color:var(--glass); }
+  .bar{ height:8px; background:var(--paper-dim); border:1px solid var(--line); margin-top:10px; overflow:hidden; }
+  .bar span{ display:block; height:100%; background:var(--glass); }
+  .table-wrap{ overflow:auto; border:1px solid var(--line); background:#fff; }
+  .data-table{ width:100%; border-collapse:collapse; min-width:760px; font-size:12px; }
+  .data-table th{ background:var(--paper-dim); color:var(--ink-dim); font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; text-align:left; padding:9px; border-bottom:1px solid var(--line); }
+  .data-table td{ padding:9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .data-table td.num{ text-align:right; font-family:var(--font-mono); white-space:nowrap; }
+  .pill{ display:inline-block; font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; text-transform:uppercase; padding:3px 7px; border:1px solid currentColor; border-radius:999px; }
+  .pill.good{ color:var(--glass); }
+  .pill.watch{ color:var(--kraft); }
+  .pill.bad{ color:var(--danger); }
   .plan-actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 16px; }
   .hint{ font-size:12px; color:var(--ink-dim); line-height:1.5; }
   .crm-box{ border:1px solid var(--line); background:#fff; padding:14px; }
@@ -115,6 +140,8 @@
     .body{ flex-direction:column; }
     .sidebar{ width:100%; border-right:none; border-bottom:2px solid var(--ink); max-height:280px; }
     .deal-summary{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .instrument-grid{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+    .verdict{ grid-template-columns:1fr; }
   }
 </style>
 </head>
@@ -140,8 +167,10 @@
     empleados:"", plantas_capacidad:"", certificaciones:"", clientes_principales:"", concentracion_clientes:"",
     fortalezas:"", riesgos:"", sinergias:"",
     valor_empresa_tx:"", multiplo_transaccion:"", capital_a_usar:"", deuda_adquisicion:"",
-    vendor_loan:"", earn_out:"", caja_objetivo:"", working_capital_objetivo:"",
-    fees_transaccion:"", estructura_pago:"", condiciones_clave:"", riesgos_financiacion:"",
+    vendor_loan:"", venture_debt:"", earn_out:"", caja_objetivo:"", working_capital_objetivo:"",
+    fees_transaccion:"", pct_equity:"", pct_deuda_bancaria:"", pct_vendor_loan:"", pct_venture_debt:"",
+    tipo_deuda_bancaria:"", tipo_venture_debt:"", tipo_vendor_loan:"", conversion_ebitda_fcf:"",
+    estructura_pago:"", condiciones_clave:"", riesgos_financiacion:"", capacidad_repago:"", tesis_impacto:"",
     plan_adquisicion:"", plan_100_dias:"",
     fuente_contacto:"", fecha_ultimo_contacto:"", notas:"",
     proxima_accion:"", fecha_proxima_accion:"",
@@ -159,6 +188,8 @@
   let filterEstado = "";
   let dirty = false;
   let activeTab = "screening";
+  let portfolio = [];
+  let portfolioLoaded = false;
 
   const app = document.getElementById('app');
   function uid(){ return 'c' + Date.now() + Math.random().toString(36).slice(2,7); }
@@ -167,7 +198,13 @@
     try{
       const r = await fetch('/api/companies');
       index = await r.json();
+      portfolioLoaded = false;
     }catch(e){ index = []; }
+  }
+  async function loadPortfolio(){
+    const records = await Promise.all(index.map(e=>loadCompany(e.id)));
+    portfolio = records.filter(Boolean).map(r=>Object.assign({}, FIELD_DEFS, r));
+    portfolioLoaded = true;
   }
   async function loadCompany(id){
     try{
@@ -280,9 +317,99 @@
     return cleaned ? Number(cleaned[0]) : 0;
   }
 
+  function parsePercent(value, fallback){
+    const n = parseNumber(value);
+    return n ? n / 100 : fallback;
+  }
+
+  function clamp(value, min, max){
+    return Math.min(Math.max(value, min), max);
+  }
+
   function formatNumber(value){
     if(!Number.isFinite(value) || value <= 0) return '';
     return value.toFixed(1).replace('.', ',');
+  }
+
+  function formatRatio(value){
+    if(!Number.isFinite(value) || value <= 0) return '—';
+    return value.toFixed(1).replace('.', ',') + 'x';
+  }
+
+  function formatPct(value){
+    if(!Number.isFinite(value)) return '—';
+    return (value * 100).toFixed(0).replace('.', ',') + '%';
+  }
+
+  function acquisitionModel(rec){
+    const ebitda = parseNumber(rec.ebitda);
+    const revenue = parseNumber(rec.facturacion_actual);
+    const multiple = parseNumber(rec.multiplo_transaccion || rec.multiplo_esperado) || 4;
+    const ev = parseNumber(rec.valor_empresa_tx) || (ebitda ? ebitda * multiple : parseNumber(rec.valoracion_estimada));
+    const netDebt = parseNumber(rec.deuda_neta);
+    const fees = parseNumber(rec.fees_transaccion) || (ev ? ev * 0.025 : 0);
+    const fundingNeed = Math.max(ev - netDebt + fees, 0);
+    let pctEquity = parsePercent(rec.pct_equity, 0.35);
+    let pctBank = parsePercent(rec.pct_deuda_bancaria, 0.35);
+    let pctVendor = parsePercent(rec.pct_vendor_loan, 0.20);
+    let pctVenture = parsePercent(rec.pct_venture_debt, 0.10);
+    const pctTotal = pctEquity + pctBank + pctVendor + pctVenture;
+    if(pctTotal > 0){ pctEquity /= pctTotal; pctBank /= pctTotal; pctVendor /= pctTotal; pctVenture /= pctTotal; }
+    const equity = parseNumber(rec.capital_a_usar) || fundingNeed * pctEquity;
+    const bankDebt = parseNumber(rec.deuda_adquisicion) || fundingNeed * pctBank;
+    const vendorLoan = parseNumber(rec.vendor_loan) || fundingNeed * pctVendor;
+    const ventureDebt = parseNumber(rec.venture_debt) || fundingNeed * pctVenture;
+    const bankRate = parsePercent(rec.tipo_deuda_bancaria, 0.08);
+    const ventureRate = parsePercent(rec.tipo_venture_debt, 0.12);
+    const vendorRate = parsePercent(rec.tipo_vendor_loan, 0.05);
+    const fcfConversion = parsePercent(rec.conversion_ebitda_fcf, 0.45);
+    const fcf = ebitda * fcfConversion;
+    const cashInterest = bankDebt * bankRate + ventureDebt * ventureRate;
+    const pikInterest = vendorLoan * vendorRate;
+    const totalDebt = bankDebt + ventureDebt + vendorLoan;
+    const seniorDebt = bankDebt + ventureDebt;
+    const leverageSenior = ebitda ? seniorDebt / ebitda : 0;
+    const leverageTotal = ebitda ? totalDebt / ebitda : 0;
+    const icr = cashInterest ? ebitda / cashInterest : 99;
+    const fcfAfterInterest = Math.max(fcf - cashInterest, 0);
+    const paybackYears = fcfAfterInterest ? seniorDebt / fcfAfterInterest : 99;
+    let level = 'good';
+    let verdict = 'Financiable';
+    if(!ebitda || !ev){ level = 'watch'; verdict = 'Datos insuficientes'; }
+    else if(leverageSenior > 3.0 || icr < 2.0 || paybackYears > 6){ level = 'bad'; verdict = 'No repaga con confort'; }
+    else if(leverageSenior > 2.25 || icr < 3.0 || paybackYears > 4.5 || leverageTotal > 4.0){ level = 'watch'; verdict = 'Financiable con estructura defensiva'; }
+    const reasons = [];
+    if(ebitda) reasons.push(`Senior debt/EBITDA ${formatRatio(leverageSenior)} y deuda total/EBITDA ${formatRatio(leverageTotal)}.`);
+    if(cashInterest) reasons.push(`ICR estimado ${formatRatio(icr)}; FCF post-intereses repaga la deuda bancaria/venture en ${paybackYears >= 90 ? 'más de 7' : paybackYears.toFixed(1).replace('.', ',')} años.`);
+    if(vendorLoan) reasons.push(`Vendor loan ${formatNumber(vendorLoan)} M€ absorbe presión de caja inicial, pero acumula riesgo de refinanciación/negociación con vendedor.`);
+    if(!ebitda || !ev) reasons.push('Faltan EBITDA normalizado o EV para emitir un juicio robusto.');
+    return { ebitda, revenue, multiple, ev, netDebt, fees, fundingNeed, equity, bankDebt, vendorLoan, ventureDebt, bankRate, ventureRate, vendorRate, fcfConversion, fcf, cashInterest, pikInterest, totalDebt, seniorDebt, leverageSenior, leverageTotal, icr, paybackYears, level, verdict, reasons };
+  }
+
+  function renderVerdict(model){
+    return `<div class="verdict ${model.level}">
+      <div>
+        <div class="verdict-label">Juicio de repago</div>
+        <h3 class="verdict-title">${escapeHtml(model.verdict)}</h3>
+        <p>${model.level==='good' ? 'La estructura parece defendible para LOI si el EBITDA es recurrente y el capex de mantenimiento está controlado.' : model.level==='watch' ? 'La operación puede tener sentido, pero exige covenants, cash sweep, vendor support o menor deuda inicial.' : 'La estructura fuerza demasiado la caja; habría que bajar precio, subir equity o convertir deuda en pago contingente.'}</p>
+      </div>
+      <div>${model.reasons.map(r=>`<p>${escapeHtml(r)}</p>`).join('')}</div>
+    </div>`;
+  }
+
+  function renderInstrumentGrid(model){
+    const parts = [
+      ['Equity', model.equity, model.fundingNeed ? model.equity/model.fundingNeed : 0, 'Capital propio'],
+      ['LBO deuda bancaria', model.bankDebt, model.fundingNeed ? model.bankDebt/model.fundingNeed : 0, `Interés ${formatPct(model.bankRate)}`],
+      ['Venture debt', model.ventureDebt, model.fundingNeed ? model.ventureDebt/model.fundingNeed : 0, `Bullet ${formatPct(model.ventureRate)}`],
+      ['Vendor loan', model.vendorLoan, model.fundingNeed ? model.vendorLoan/model.fundingNeed : 0, `PIK ${formatPct(model.vendorRate)}`]
+    ];
+    return `<div class="instrument-grid">${parts.map(p=>`<div class="instrument">
+      <strong>${escapeHtml(p[0])}</strong>
+      <div class="amount">${formatNumber(p[1]) || '—'} M€</div>
+      <div class="msub">${formatPct(p[2])} · ${escapeHtml(p[3])}</div>
+      <div class="bar"><span style="width:${clamp(p[2]*100,0,100)}%"></span></div>
+    </div>`).join('')}</div>`;
   }
 
   function metric(label, value, sub){
@@ -402,31 +529,29 @@
   }
 
   function handleGeneratePlan(){
-    const ebitda = parseNumber(current.ebitda);
-    const multiple = parseNumber(current.multiplo_transaccion || current.multiplo_esperado);
-    const netDebt = parseNumber(current.deuda_neta);
-    let enterpriseValue = parseNumber(current.valor_empresa_tx);
-    if(!enterpriseValue && ebitda && multiple){
-      enterpriseValue = ebitda * multiple;
-      current.valor_empresa_tx = formatNumber(enterpriseValue);
-    }
-    if(!current.multiplo_transaccion && current.multiplo_esperado){
-      current.multiplo_transaccion = current.multiplo_esperado;
-    }
-    const equityPrice = Math.max(enterpriseValue - netDebt, 0);
-    if(equityPrice && !parseNumber(current.vendor_loan)) current.vendor_loan = formatNumber(equityPrice * 0.20);
-    if(enterpriseValue && !parseNumber(current.deuda_adquisicion)) current.deuda_adquisicion = formatNumber(enterpriseValue * 0.35);
-    const vendorLoan = parseNumber(current.vendor_loan);
-    const acquisitionDebt = parseNumber(current.deuda_adquisicion);
-    const earnOut = parseNumber(current.earn_out);
-    if(equityPrice){
-      current.capital_a_usar = formatNumber(Math.max(equityPrice - vendorLoan - acquisitionDebt - earnOut, 0));
-    }
-    current.estructura_pago = current.estructura_pago || 'Pago inicial con equity del comprador y deuda de adquisición, complementado con vendor loan subordinado sujeto a permanencia y garantías estándar.';
-    current.condiciones_clave = current.condiciones_clave || 'Confirmar EBITDA normalizado, deuda neta/caja al cierre, working capital objetivo, concentración de clientes, capex recurrente y vigencia de certificaciones alimentarias.';
-    current.riesgos_financiacion = current.riesgos_financiacion || 'Riesgo de sobrepagar si el EBITDA no es recurrente, tensión de caja por integración, dependencia de clientes principales y posible necesidad de capex para capacidad/certificaciones.';
-    current.plan_adquisicion = `Plan base generado con los datos disponibles: EV ${current.valor_empresa_tx || 'pendiente'} M€, múltiplo ${current.multiplo_transaccion || 'pendiente'}x, vendor loan ${current.vendor_loan || 'pendiente'} M€, deuda de adquisición ${current.deuda_adquisicion || 'pendiente'} M€ y capital a usar ${current.capital_a_usar || 'pendiente'} M€. Validar estos importes contra QoE, deuda neta y working capital antes de LOI.`;
-    current.plan_100_dias = current.plan_100_dias || 'Día 0-30: confirmar reporting financiero, contratos clave y mapa de certificaciones. Día 31-60: integrar compras, pricing y control de márgenes. Día 61-100: plan comercial cross-sell, sinergias productivas y tablero mensual de KPIs.';
+    if(!current.pct_equity) current.pct_equity = '35';
+    if(!current.pct_deuda_bancaria) current.pct_deuda_bancaria = '35';
+    if(!current.pct_venture_debt) current.pct_venture_debt = '10';
+    if(!current.pct_vendor_loan) current.pct_vendor_loan = '20';
+    if(!current.tipo_deuda_bancaria) current.tipo_deuda_bancaria = '8';
+    if(!current.tipo_venture_debt) current.tipo_venture_debt = '12';
+    if(!current.tipo_vendor_loan) current.tipo_vendor_loan = '5';
+    if(!current.conversion_ebitda_fcf) current.conversion_ebitda_fcf = '45';
+    if(!current.multiplo_transaccion && current.multiplo_esperado) current.multiplo_transaccion = current.multiplo_esperado;
+    const model = acquisitionModel(current);
+    if(model.ev && !parseNumber(current.valor_empresa_tx)) current.valor_empresa_tx = formatNumber(model.ev);
+    current.capital_a_usar = formatNumber(model.equity);
+    current.deuda_adquisicion = formatNumber(model.bankDebt);
+    current.venture_debt = formatNumber(model.ventureDebt);
+    current.vendor_loan = formatNumber(model.vendorLoan);
+    if(!current.fees_transaccion && model.fees) current.fees_transaccion = formatNumber(model.fees);
+    current.estructura_pago = `Mix propuesto sobre necesidad de financiación estimada: equity ${current.pct_equity}%, deuda bancaria LBO ${current.pct_deuda_bancaria}%, venture debt ${current.pct_venture_debt}% y vendor loan ${current.pct_vendor_loan}%. La deuda bancaria debe tener amortización/cash sweep; venture debt preferiblemente bullet; vendor loan subordinado con PIK y covenants de información.`;
+    current.condiciones_clave = current.condiciones_clave || 'QoE con EBITDA normalizado, puente deuda neta/caja, working capital target, capex de mantenimiento, concentración de clientes, permisos/certificaciones alimentarias y confirmación de churn/márgenes por producto.';
+    current.riesgos_financiacion = `Riesgo principal: ${model.level==='good' ? 'la estructura es razonable, pero depende de que el EBITDA convierta en caja y no requiera capex extraordinario.' : model.level==='watch' ? 'la caja queda ajustada; exigir menor deuda inicial, cash sweep, vendor loan más largo o precio contingente.' : 'la empresa no soporta el apalancamiento propuesto; bajar precio o sustituir deuda por equity/earn-out.'}`;
+    current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
+    current.tesis_impacto = current.tesis_impacto || 'Encaje pendiente de validar contra la tesis de roll-up: densidad de clientes alimentarios, potencial de compras centralizadas, capacidad productiva complementaria, certificaciones y disciplina de margen.';
+    current.plan_adquisicion = `Recomendación de inversión: ${model.verdict}. EV ${formatNumber(model.ev) || 'pendiente'} M€ (${formatRatio(model.multiple)} EBITDA), necesidad de financiación ${formatNumber(model.fundingNeed) || 'pendiente'} M€. Estructura: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)}. Siguiente paso: no enviar LOI hasta cerrar QoE, deuda neta, working capital y capex recurrente.`;
+    current.plan_100_dias = current.plan_100_dias || 'Día 0-30: control de caja diario, reporting EBITDA/FCF, contratos top clientes y auditoría de certificaciones. Día 31-60: capturar sinergias de compras, pricing y logística. Día 61-100: tablero mensual de covenants, plan comercial cross-sell y quick wins de capacidad/margen.';
     dirty = true;
     markDirty();
     renderMain();
@@ -474,6 +599,83 @@
     renderMain();
   }
 
+  function renderPortfolioTab(){
+    if(!portfolioLoaded){
+      return `<div class="section"><div class="stitle"><span class="num">P1</span> Tesis consolidada</div><div class="empty-list" style="padding:18px 0;">Cargando información completa de las empresas...</div></div>`;
+    }
+    const activeCompanies = portfolio.filter(c=>c.estado !== 'Descartada');
+    const models = activeCompanies.map(c=>({ company:c, model:acquisitionModel(c) }));
+    const totals = models.reduce((acc, row)=>{
+      acc.ev += row.model.ev || 0;
+      acc.revenue += row.model.revenue || 0;
+      acc.ebitda += row.model.ebitda || 0;
+      acc.equity += row.model.equity || 0;
+      acc.bankDebt += row.model.bankDebt || 0;
+      acc.ventureDebt += row.model.ventureDebt || 0;
+      acc.vendorLoan += row.model.vendorLoan || 0;
+      acc.seniorDebt += row.model.seniorDebt || 0;
+      acc.totalDebt += row.model.totalDebt || 0;
+      return acc;
+    }, {ev:0,revenue:0,ebitda:0,equity:0,bankDebt:0,ventureDebt:0,vendorLoan:0,seniorDebt:0,totalDebt:0});
+    const consolidatedMargin = totals.revenue ? totals.ebitda / totals.revenue : 0;
+    const seniorLeverage = totals.ebitda ? totals.seniorDebt / totals.ebitda : 0;
+    const totalLeverage = totals.ebitda ? totals.totalDebt / totals.ebitda : 0;
+    const good = models.filter(r=>r.model.level==='good').length;
+    const watch = models.filter(r=>r.model.level==='watch').length;
+    const bad = models.filter(r=>r.model.level==='bad').length;
+    const verdict = bad ? 'Tesis bajo presión' : watch ? 'Tesis defendible con disciplina' : 'Tesis financieramente limpia';
+    const verdictClass = bad ? 'bad' : watch ? 'watch' : 'good';
+    const segmentMap = {};
+    activeCompanies.forEach(c=>{ segmentMap[c.segmento || 'Sin segmento'] = (segmentMap[c.segmento || 'Sin segmento'] || 0) + 1; });
+    const segmentText = Object.entries(segmentMap).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k}: ${v}`).join(' · ') || 'Sin empresas activas';
+    return `
+      <div class="section">
+        <div class="stitle"><span class="num">P1</span> Lectura de comité</div>
+        <div class="verdict ${verdictClass}">
+          <div>
+            <div class="verdict-label">Tesis consolidada</div>
+            <h3 class="verdict-title">${escapeHtml(verdict)}</h3>
+            <p>${bad ? 'Hay targets cuya estructura no repaga con comodidad. La tesis debe priorizar renegociación de precio, más equity o vendor support antes de avanzar.' : watch ? 'La cartera puede funcionar, pero la creación de valor depende de disciplina de entrada, sinergias reales y control de deuda.' : 'La cartera muestra una base razonable para una plataforma apalancada, pendiente de QoE y confirmación de caja.'}</p>
+          </div>
+          <div>
+            <p>Mapa de segmentos: ${escapeHtml(segmentText)}.</p>
+            <p>Semáforo de repago: ${good} financiables, ${watch} en vigilancia, ${bad} no cómodas.</p>
+            <p>Apalancamiento consolidado senior ${formatRatio(seniorLeverage)} y total ${formatRatio(totalLeverage)} sobre EBITDA agregado.</p>
+          </div>
+        </div>
+        <div class="deal-summary">
+          ${metric('Empresas activas', String(activeCompanies.length), 'Excluye descartadas')}
+          ${metric('Facturación agregada', formatNumber(totals.revenue) ? formatNumber(totals.revenue) + ' M€' : '', 'Último año')}
+          ${metric('EBITDA agregado', formatNumber(totals.ebitda) ? formatNumber(totals.ebitda) + ' M€' : '', `Margen ${formatPct(consolidatedMargin)}`)}
+          ${metric('EV agregado', formatNumber(totals.ev) ? formatNumber(totals.ev) + ' M€' : '', 'Targets con datos')}
+        </div>
+        ${renderInstrumentGrid({ fundingNeed: totals.equity + totals.bankDebt + totals.ventureDebt + totals.vendorLoan, equity: totals.equity, bankDebt: totals.bankDebt, ventureDebt: totals.ventureDebt, vendorLoan: totals.vendorLoan, bankRate:0.08, ventureRate:0.12, vendorRate:0.05 })}
+      </div>
+
+      <div class="section">
+        <div class="stitle"><span class="num">P2</span> Matriz de targets e impacto en tesis</div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Empresa</th><th>Segmento</th><th>Estado</th><th>Repago</th><th>EV</th><th>EBITDA</th><th>Senior lev.</th><th>ICR</th><th>Impacto en tesis</th></tr></thead>
+            <tbody>
+              ${models.length ? models.map(row=>`<tr>
+                <td><strong>${escapeHtml(row.company.nombre || '(sin nombre)')}</strong></td>
+                <td>${escapeHtml(row.company.segmento || '—')}</td>
+                <td>${escapeHtml(row.company.estado || '—')}</td>
+                <td><span class="pill ${row.model.level}">${escapeHtml(row.model.verdict)}</span></td>
+                <td class="num">${formatNumber(row.model.ev) || '—'} M€</td>
+                <td class="num">${formatNumber(row.model.ebitda) || '—'} M€</td>
+                <td class="num">${formatRatio(row.model.leverageSenior)}</td>
+                <td class="num">${formatRatio(row.model.icr)}</td>
+                <td>${escapeHtml(row.company.tesis_impacto || row.company.sinergias || row.company.fortalezas || 'Pendiente de redactar en el plan de adquisición.')}</td>
+              </tr>`).join('') : `<tr><td colspan="9">No hay empresas activas para consolidar.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   function renderMain(){
     const main = document.getElementById('main');
     if(!current){
@@ -510,6 +712,7 @@
       <div class="tabs">
         <button class="tabbtn ${activeTab==='screening'?'active':''}" data-tab="screening">Ficha de screening</button>
         <button class="tabbtn ${activeTab==='acquisition'?'active':''}" data-tab="acquisition">Plan de adquisición</button>
+        <button class="tabbtn ${activeTab==='portfolio'?'active':''}" data-tab="portfolio">Tesis consolidada</button>
       </div>
 
       <div class="tab-panel ${activeTab==='screening'?'active':''}">
@@ -588,34 +791,56 @@
       </div>
 
       <div class="tab-panel ${activeTab==='acquisition'?'active':''}">
+        ${(() => {
+          const model = acquisitionModel(current);
+          return `
         <div class="section">
-          <div class="stitle"><span class="num">A1</span> Resumen de transacción</div>
+          <div class="stitle"><span class="num">A1</span> Comité de inversión y repago</div>
+          ${renderVerdict(model)}
           <div class="deal-summary">
-            ${metric('EV / valor empresa', current.valor_empresa_tx ? current.valor_empresa_tx + ' M€' : '', 'Enterprise value')}
-            ${metric('Múltiplo', current.multiplo_transaccion ? current.multiplo_transaccion + 'x' : '', 'EV / EBITDA')}
-            ${metric('Capital a usar', current.capital_a_usar ? current.capital_a_usar + ' M€' : '', 'Equity cheque estimado')}
-            ${metric('Vendor loan', current.vendor_loan ? current.vendor_loan + ' M€' : '', 'Financiación vendedor')}
+            ${metric('EV / valor empresa', formatNumber(model.ev) ? formatNumber(model.ev) + ' M€' : '', 'Enterprise value')}
+            ${metric('Senior leverage', formatRatio(model.leverageSenior), 'Banco + venture / EBITDA')}
+            ${metric('ICR', formatRatio(model.icr), 'EBITDA / intereses cash')}
+            ${metric('Repago senior', model.paybackYears >= 90 ? '>7 años' : model.paybackYears.toFixed(1).replace('.', ',') + ' años', 'Con FCF post-intereses')}
           </div>
+          ${renderInstrumentGrid(model)}
           <div class="plan-actions">
-            <button class="uploadbtn" id="generatePlanBtn">Generar plan base</button>
-            <span class="hint">Usa EBITDA, deuda neta y múltiplo para proponer EV, vendor loan, deuda y capital. Después ajusta manualmente antes de guardar.</span>
+            <button class="uploadbtn" id="generatePlanBtn">Generar estructura analista</button>
+            <span class="hint">Ajusta porcentajes e intereses por instrumento. La app normaliza el mix y calcula repago, leverage e ICR con conversión EBITDA→FCF.</span>
           </div>
           <div class="grid">
             ${field('valor_empresa_tx','Valor empresa / EV (M€)', {mono:true})}
             ${field('multiplo_transaccion','Múltiplo de la transacción (x EBITDA)', {mono:true})}
-            ${field('capital_a_usar','Capital a usar / equity cheque (M€)', {mono:true})}
-            ${field('deuda_adquisicion','Deuda de adquisición (M€)', {mono:true})}
-            ${field('vendor_loan','Vendor loan a aplicar (M€)', {mono:true})}
-            ${field('earn_out','Earn-out / pago diferido (M€)', {mono:true})}
-            ${field('caja_objetivo','Caja objetivo al cierre (M€)', {mono:true})}
-            ${field('working_capital_objetivo','Working capital objetivo (M€)', {mono:true})}
             ${field('fees_transaccion','Fees y costes transacción (M€)', {mono:true})}
+            ${field('conversion_ebitda_fcf','Conversión EBITDA → FCF (%)', {mono:true, placeholder:'45'})}
           </div>
         </div>
 
         <div class="section">
-          <div class="stitle"><span class="num">A2</span> Estructura y condiciones</div>
+          <div class="stitle"><span class="num">A2</span> Mix de financiación</div>
           <div class="grid">
+            ${field('pct_equity','% Equity', {mono:true, placeholder:'35'})}
+            ${field('pct_deuda_bancaria','% LBO / deuda bancaria', {mono:true, placeholder:'35'})}
+            ${field('pct_venture_debt','% Venture debt', {mono:true, placeholder:'10'})}
+            ${field('pct_vendor_loan','% Vendor loan', {mono:true, placeholder:'20'})}
+            ${field('capital_a_usar','Capital a usar / equity cheque (M€)', {mono:true})}
+            ${field('deuda_adquisicion','Deuda de adquisición (M€)', {mono:true})}
+            ${field('vendor_loan','Vendor loan a aplicar (M€)', {mono:true})}
+            ${field('venture_debt','Venture debt a aplicar (M€)', {mono:true})}
+            ${field('tipo_deuda_bancaria','Coste deuda bancaria (%)', {mono:true, placeholder:'8'})}
+            ${field('tipo_venture_debt','Coste venture debt (%)', {mono:true, placeholder:'12'})}
+            ${field('tipo_vendor_loan','Coste vendor loan / PIK (%)', {mono:true, placeholder:'5'})}
+            ${field('earn_out','Earn-out / pago diferido (M€)', {mono:true})}
+            ${field('caja_objetivo','Caja objetivo al cierre (M€)', {mono:true})}
+            ${field('working_capital_objetivo','Working capital objetivo (M€)', {mono:true})}
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="stitle"><span class="num">A3</span> Estructura, condiciones y tesis</div>
+          <div class="grid">
+            ${field('capacidad_repago','Diagnóstico de capacidad de repago', {wide:true, type:'textarea'})}
+            ${field('tesis_impacto','Impacto en la tesis de adquisición', {wide:true, type:'textarea', placeholder:'Qué aporta esta empresa al roll-up: geografía, segmento, clientes, margen, sinergias, riesgos...'})}
             ${field('estructura_pago','Estructura de pago', {wide:true, type:'textarea', placeholder:'Equity inicial, deuda senior, vendor loan, earn-out, retenciones...'})}
             ${field('condiciones_clave','Condiciones clave para LOI / SPA', {wide:true, type:'textarea'})}
             ${field('riesgos_financiacion','Riesgos de financiación', {wide:true, type:'textarea'})}
@@ -623,6 +848,12 @@
             ${field('plan_100_dias','Plan 100 días post-cierre', {wide:true, type:'textarea'})}
           </div>
         </div>
+          `;
+        })()}
+      </div>
+
+      <div class="tab-panel ${activeTab==='portfolio'?'active':''}">
+        ${renderPortfolioTab()}
       </div>
 
       <div class="savebar">
@@ -639,7 +870,14 @@
     document.getElementById('saveBtn').addEventListener('click', doSave);
     document.getElementById('delBtn').addEventListener('click', doDelete);
     main.querySelectorAll('.tabbtn').forEach(btn=>{
-      btn.addEventListener('click', e=>{ activeTab=e.target.dataset.tab; renderMain(); });
+      btn.addEventListener('click', async e=>{
+        activeTab=e.target.dataset.tab;
+        renderMain();
+        if(activeTab === 'portfolio' && !portfolioLoaded){
+          await loadPortfolio();
+          renderMain();
+        }
+      });
     });
     const analyzeBtn = document.getElementById('analyzeBtn');
     if(analyzeBtn) analyzeBtn.addEventListener('click', handleAnalyze);
