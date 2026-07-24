@@ -30,6 +30,8 @@
   .sidebar-tools select{ padding:8px 6px; border:1px solid var(--line); background:var(--paper); font-size:12px; color:var(--ink); max-width:110px; }
   .newbtn{ margin:12px 16px; padding:10px 12px; background:var(--glass); color:var(--paper); border:none; font-family:var(--font-mono); font-size:12px; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
   .newbtn:hover{ background:var(--glass-dim); }
+  .menubtn{ margin:0 16px 12px; padding:10px 12px; background:var(--paper); color:var(--ink); border:1px solid var(--ink); font-family:var(--font-mono); font-size:12px; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; text-align:left; }
+  .menubtn:hover, .menubtn.active{ background:var(--ink); color:var(--paper); }
   .list{ flex:1; overflow-y:auto; padding:0 0 16px; }
   .card{ margin:0 12px 8px; padding:10px 12px; border:1px solid var(--line); background:var(--paper); cursor:pointer; position:relative; }
   .card:hover{ border-color:var(--glass); }
@@ -189,6 +191,7 @@
   let filterEstado = "";
   let dirty = false;
   let activeTab = "screening";
+  let viewMode = "company";
   let portfolio = [];
   let portfolioLoaded = false;
 
@@ -263,10 +266,11 @@
             </select>
           </div>
           <button class="newbtn" id="newBtn">+ Nueva desde cero</button>
+          <button class="menubtn ${viewMode==='portfolio'?'active':''}" id="portfolioBtn">Tesis consolidada</button>
           <div class="list" id="list">
             ${filtered.length===0 ? `<div class="empty-list">${index.length===0 ? 'Todavía no hay empresas cargadas. Sube un documento en el panel principal o crea una ficha desde cero.' : 'Sin resultados para ese filtro.'}</div>` :
               filtered.map(e=>`
-                <div class="card ${current&&current.id===e.id?'active':''}" data-id="${e.id}">
+                <div class="card ${viewMode==='company'&&current&&current.id===e.id?'active':''}" data-id="${e.id}">
                   <div class="cname">${escapeHtml(e.nombre)}</div>
                   <div class="cmeta">${escapeHtml(e.segmento||'Segmento sin definir')}</div>
                   <div class="stamp" style="color:${STATUS_COLOR[e.estado]||'var(--ink-dim)'}">${e.estado}</div>
@@ -282,6 +286,7 @@
     document.getElementById('search').addEventListener('input', e=>{ filterText=e.target.value; render(); });
     document.getElementById('filterEstado').addEventListener('change', e=>{ filterEstado=e.target.value; render(); });
     document.getElementById('newBtn').addEventListener('click', createNew);
+    document.getElementById('portfolioBtn').addEventListener('click', openPortfolio);
     document.querySelectorAll('.card').forEach(c=>{
       c.addEventListener('click', ()=>openCompany(c.dataset.id));
     });
@@ -291,8 +296,18 @@
   function createNew(){
     current = Object.assign({}, FIELD_DEFS, {id: uid()});
     activeTab = "screening";
+    viewMode = "company";
     dirty = true;
     render();
+  }
+
+  async function openPortfolio(){
+    viewMode = "portfolio";
+    render();
+    if(!portfolioLoaded){
+      await loadPortfolio();
+      render();
+    }
   }
 
   async function openCompany(id){
@@ -300,6 +315,7 @@
     if(rec){
       current = Object.assign({}, FIELD_DEFS, rec);
       activeTab = "screening";
+      viewMode = "company";
       dirty = false;
       render();
     }
@@ -779,6 +795,10 @@
 
   function renderMain(){
     const main = document.getElementById('main');
+    if(viewMode === 'portfolio'){
+      main.innerHTML = renderPortfolioTab();
+      return;
+    }
     if(!current){
       main.innerHTML = `
         <div class="start-upload">
@@ -813,7 +833,6 @@
       <div class="tabs">
         <button class="tabbtn ${activeTab==='screening'?'active':''}" data-tab="screening">Ficha de screening</button>
         <button class="tabbtn ${activeTab==='acquisition'?'active':''}" data-tab="acquisition">Plan de adquisición</button>
-        <button class="tabbtn ${activeTab==='portfolio'?'active':''}" data-tab="portfolio">Tesis consolidada</button>
       </div>
 
       <div class="tab-panel ${activeTab==='screening'?'active':''}">
@@ -958,11 +977,6 @@
           `;
         })()}
       </div>
-
-      <div class="tab-panel ${activeTab==='portfolio'?'active':''}">
-        ${renderPortfolioTab()}
-      </div>
-
       <div class="savebar">
         <span id="statusMsg">${dirty? 'Cambios sin guardar' : 'Guardado'}</span>
         <button class="savebtn" id="saveBtn">Guardar ficha</button>
@@ -977,13 +991,9 @@
     document.getElementById('saveBtn').addEventListener('click', doSave);
     document.getElementById('delBtn').addEventListener('click', doDelete);
     main.querySelectorAll('.tabbtn').forEach(btn=>{
-      btn.addEventListener('click', async e=>{
+      btn.addEventListener('click', e=>{
         activeTab=e.target.dataset.tab;
         renderMain();
-        if(activeTab === 'portfolio' && !portfolioLoaded){
-          await loadPortfolio();
-          renderMain();
-        }
       });
     });
     const analyzeBtn = document.getElementById('analyzeBtn');
