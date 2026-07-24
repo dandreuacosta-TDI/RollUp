@@ -394,9 +394,14 @@
     return cleaned ? Number(cleaned[0]) : 0;
   }
 
+  function parseOptionalNumber(value){
+    const cleaned = (value || '').toString().replace(',', '.').match(/-?\d+(\.\d+)?/);
+    return cleaned ? Number(cleaned[0]) : null;
+  }
+
   function parsePercent(value, fallback){
-    const n = parseNumber(value);
-    return n ? n / 100 : fallback;
+    const n = parseOptionalNumber(value);
+    return n === null ? fallback : n / 100;
   }
 
   function clamp(value, min, max){
@@ -428,14 +433,13 @@
     const netDebt = parseNumber(rec.deuda_neta);
     const equityValue = Math.max(ev - netDebt, 0);
     const purchasePrice = sellerPrice || equityValue || ev;
-    const fees = parseNumber(rec.fees_transaccion) || (purchasePrice ? purchasePrice * 0.025 : 0);
+    const feeInput = parseOptionalNumber(rec.fees_transaccion);
+    const fees = feeInput === null ? (purchasePrice ? purchasePrice * 0.025 : 0) : feeInput;
     const fundingNeed = Math.max(purchasePrice + fees, 0);
-    let pctEquity = parsePercent(rec.pct_equity, 0.35);
-    let pctBank = parsePercent(rec.pct_deuda_bancaria, 0.35);
-    let pctVendor = parsePercent(rec.pct_vendor_loan, 0.20);
-    let pctVenture = parsePercent(rec.pct_venture_debt, 0.10);
-    const pctTotal = pctEquity + pctBank + pctVendor + pctVenture;
-    if(pctTotal > 0){ pctEquity /= pctTotal; pctBank /= pctTotal; pctVendor /= pctTotal; pctVenture /= pctTotal; }
+    const pctEquity = parsePercent(rec.pct_equity, 0.35);
+    const pctBank = parsePercent(rec.pct_deuda_bancaria, 0.35);
+    const pctVendor = parsePercent(rec.pct_vendor_loan, 0.20);
+    const pctVenture = parsePercent(rec.pct_venture_debt, 0.10);
     const equity = opts.forcePercentages ? fundingNeed * pctEquity : (parseNumber(rec.capital_a_usar) || fundingNeed * pctEquity);
     const bankDebt = opts.forcePercentages ? fundingNeed * pctBank : (parseNumber(rec.deuda_adquisicion) || fundingNeed * pctBank);
     const vendorLoan = opts.forcePercentages ? fundingNeed * pctVendor : (parseNumber(rec.vendor_loan) || fundingNeed * pctVendor);
@@ -454,17 +458,24 @@
     const icr = cashInterest ? ebitda / cashInterest : 99;
     const fcfAfterInterest = Math.max(fcf - cashInterest, 0);
     const paybackYears = fcfAfterInterest ? seniorDebt / fcfAfterInterest : 99;
+    const totalDebtPaybackYears = fcfAfterInterest ? totalDebt / fcfAfterInterest : 99;
+    const totalSources = equity + bankDebt + vendorLoan + ventureDebt;
+    const fundingGap = fundingNeed - totalSources;
+    const fundingGapAbs = Math.abs(fundingGap);
     let level = 'good';
     let verdict = 'Financiable';
     if(!ebitda || !ev){ level = 'watch'; verdict = 'Datos insuficientes'; }
+    else if(fundingGap > 0.05){ level = 'watch'; verdict = 'Escenario incompleto'; }
     else if(leverageSenior > 3.0 || icr < 2.0 || paybackYears > 6){ level = 'bad'; verdict = 'No repaga con confort'; }
     else if(leverageSenior > 2.25 || icr < 3.0 || paybackYears > 4.5 || leverageTotal > 4.0){ level = 'watch'; verdict = 'Financiable con estructura defensiva'; }
     const reasons = [];
+    if(fundingGap > 0.05) reasons.push(`Faltan ${formatNumber(fundingGap)} M€ de fuentes para cubrir precio y fees.`);
+    if(fundingGap < -0.05) reasons.push(`Sobran ${formatNumber(fundingGapAbs)} M€ de fuentes; reduce porcentajes o baja equity.`);
     if(ebitda) reasons.push(`Senior debt/EBITDA ${formatRatio(leverageSenior)} y deuda total/EBITDA ${formatRatio(leverageTotal)}.`);
     if(cashInterest) reasons.push(`ICR estimado ${formatRatio(icr)}; FCF post-intereses repaga la deuda bancaria/venture en ${paybackYears >= 90 ? 'más de 7' : paybackYears.toFixed(1).replace('.', ',')} años.`);
     if(vendorLoan) reasons.push(`Vendor loan ${formatNumber(vendorLoan)} M€ absorbe presión de caja inicial, pero acumula riesgo de refinanciación/negociación con vendedor.`);
     if(!ebitda || !ev) reasons.push('Faltan EBITDA normalizado o EV para emitir un juicio robusto.');
-    return { ebitda, revenue, multiple, ev, sellerPrice, equityValue, purchasePrice, netDebt, fees, fundingNeed, equity, bankDebt, vendorLoan, ventureDebt, bankRate, ventureRate, vendorRate, fcfConversion, fcf, cashInterest, pikInterest, totalDebt, seniorDebt, leverageSenior, leverageTotal, icr, paybackYears, level, verdict, reasons };
+    return { ebitda, revenue, multiple, ev, sellerPrice, equityValue, purchasePrice, netDebt, fees, fundingNeed, totalSources, fundingGap, fundingGapAbs, equity, bankDebt, vendorLoan, ventureDebt, bankRate, ventureRate, vendorRate, fcfConversion, fcf, cashInterest, pikInterest, fcfAfterInterest, totalDebt, seniorDebt, leverageSenior, leverageTotal, icr, paybackYears, totalDebtPaybackYears, level, verdict, reasons };
   }
 
   function scoreScenario(model){
@@ -478,6 +489,7 @@
 
   function optimizeAcquisitionStructure(baseRec){
     const candidates = [];
+    const fallbackCandidates = [];
     const equityOptions = [0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60];
     const bankOptions = [0.15,0.20,0.25,0.30,0.35,0.40,0.45];
     const ventureOptions = [0,0.05,0.10,0.15];
@@ -495,13 +507,18 @@
           });
           const model = acquisitionModel(rec, { forcePercentages:true });
           if(!model.ebitda || !model.ev) return;
-          if(model.level === 'bad') return;
-          candidates.push({ rec, model, score:scoreScenario(model) });
+          if(Math.abs(model.fundingGap) > 0.05 || model.level === 'bad') return;
+          const scored = { rec, model, score:scoreScenario(model) };
+          fallbackCandidates.push(scored);
+          if(model.icr >= 2.5 && model.paybackYears <= 5 && model.leverageSenior <= 2.6 && model.leverageTotal <= 4.0){
+            candidates.push(scored);
+          }
         });
       });
     });
-    candidates.sort((a,b)=>a.score-b.score);
-    return candidates[0] || null;
+    const pool = candidates.length ? candidates : fallbackCandidates;
+    pool.sort((a,b)=>a.score-b.score);
+    return pool[0] || null;
   }
 
   function buildSavedScenario(model){
@@ -671,12 +688,12 @@
     current.venture_debt = formatNumber(model.ventureDebt);
     current.vendor_loan = formatNumber(model.vendorLoan);
     if(!current.fees_transaccion && model.fees) current.fees_transaccion = formatNumber(model.fees);
-    current.estructura_pago = `Escenario manual calculado con los porcentajes introducidos: equity ${current.pct_equity}%, deuda bancaria LBO ${current.pct_deuda_bancaria}%, venture debt ${current.pct_venture_debt}% y vendor loan ${current.pct_vendor_loan}%. La app normaliza el total si no suma exactamente 100%. La deuda bancaria debe tener amortización/cash sweep; venture debt preferiblemente bullet; vendor loan subordinado con PIK y covenants de información.`;
+    current.estructura_pago = `Escenario manual calculado con los porcentajes introducidos: equity ${current.pct_equity}%, deuda bancaria LBO ${current.pct_deuda_bancaria}%, venture debt ${current.pct_venture_debt}% y vendor loan ${current.pct_vendor_loan}%. Total fuentes: ${formatNumber(model.totalSources) || '—'} M€ frente a necesidad ${formatNumber(model.fundingNeed) || '—'} M€. La app NO normaliza porcentajes: si no suman 100%, verás gap o exceso de financiación.`;
     current.condiciones_clave = current.condiciones_clave || 'QoE con EBITDA normalizado, puente deuda neta/caja, working capital target, capex de mantenimiento, concentración de clientes, permisos/certificaciones alimentarias y confirmación de churn/márgenes por producto.';
     current.riesgos_financiacion = `Riesgo principal: ${model.level==='good' ? 'la estructura es razonable, pero depende de que el EBITDA convierta en caja y no requiera capex extraordinario.' : model.level==='watch' ? 'la caja queda ajustada; exigir menor deuda inicial, cash sweep, vendor loan más largo o precio contingente.' : 'la empresa no soporta el apalancamiento propuesto; bajar precio o sustituir deuda por equity/earn-out.'}`;
     current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
     current.tesis_impacto = current.tesis_impacto || 'Encaje pendiente de validar contra la tesis de roll-up: densidad de clientes alimentarios, potencial de compras centralizadas, capacidad productiva complementaria, certificaciones y disciplina de margen.';
-    current.plan_adquisicion = `Escenario manual: ${model.verdict}. Precio a financiar ${formatNumber(model.purchasePrice) || 'pendiente'} M€ y necesidad total ${formatNumber(model.fundingNeed) || 'pendiente'} M€ incluyendo fees. Estructura resultante: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)}. Siguiente paso: contrastar contra QoE, deuda neta, working capital y capex recurrente.`;
+    current.plan_adquisicion = `Escenario manual: ${model.verdict}. Precio a financiar ${formatNumber(model.purchasePrice) || 'pendiente'} M€ y necesidad total ${formatNumber(model.fundingNeed) || 'pendiente'} M€ incluyendo fees. Fuentes totales ${formatNumber(model.totalSources) || '—'} M€ (${model.fundingGap > 0.05 ? 'faltan ' + formatNumber(model.fundingGap) + ' M€' : model.fundingGap < -0.05 ? 'sobran ' + formatNumber(model.fundingGapAbs) + ' M€' : 'cuadrado'}). Estructura: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)} y repago senior ${model.paybackYears >= 90 ? '>7 años' : model.paybackYears.toFixed(1).replace('.', ',') + ' años'}.`;
     current.plan_100_dias = current.plan_100_dias || 'Día 0-30: control de caja diario, reporting EBITDA/FCF, contratos top clientes y auditoría de certificaciones. Día 31-60: capturar sinergias de compras, pricing y logística. Día 61-100: tablero mensual de covenants, plan comercial cross-sell y quick wins de capacidad/margen.';
     noteChanged(150);
     renderMain();
@@ -980,7 +997,11 @@
           ${renderVerdict(model)}
           <div class="deal-summary">
             ${metric('Necesidad financiación', formatNumber(model.fundingNeed) ? formatNumber(model.fundingNeed) + ' M€' : '', 'Precio + fees')}
+            ${metric('Fuentes totales', formatNumber(model.totalSources) ? formatNumber(model.totalSources) + ' M€' : '', model.fundingGap > 0.05 ? 'Faltan ' + formatNumber(model.fundingGap) + ' M€' : model.fundingGap < -0.05 ? 'Sobran ' + formatNumber(model.fundingGapAbs) + ' M€' : 'Cuadrado')}
+            ${metric('Deuda total', formatNumber(model.totalDebt) ? formatNumber(model.totalDebt) + ' M€' : '', 'Banco + venture + vendor')}
+            ${metric('FCF post-intereses', formatNumber(model.fcfAfterInterest) ? formatNumber(model.fcfAfterInterest) + ' M€' : '', 'Caja anual estimada')}
             ${metric('Senior leverage', formatRatio(model.leverageSenior), 'Banco + venture / EBITDA')}
+            ${metric('Total leverage', formatRatio(model.leverageTotal), 'Deuda total / EBITDA')}
             ${metric('ICR', formatRatio(model.icr), 'EBITDA / intereses cash')}
             ${metric('Repago senior', model.paybackYears >= 90 ? '>7 años' : model.paybackYears.toFixed(1).replace('.', ',') + ' años', 'Con FCF post-intereses')}
           </div>
@@ -990,7 +1011,7 @@
             <button class="uploadbtn secondary-action" id="optimizeStructureBtn">Proponer estructura ideal</button>
             <button class="uploadbtn quiet-action" id="saveScenarioBtn">Guardar escenario</button>
             <button class="uploadbtn quiet-action" id="generateLoiBtn">Generar LOI</button>
-            <span class="hint">Los porcentajes manuales se aplican al pulsar calcular. La estructura ideal explora combinaciones y elige la mejor relación entre uso de equity y capacidad de repago.</span>
+            <span class="hint">Los porcentajes manuales se aplican literalmente. Si no suman 100%, verás déficit o exceso. La estructura ideal usa porcentajes que suman 100% y filtra por ICR, leverage y repago.</span>
           </div>
           <div class="grid">
             ${field('precio_acordado_vendedor','Precio fijado con vendedor / EV acordado (M€)', {mono:true})}
