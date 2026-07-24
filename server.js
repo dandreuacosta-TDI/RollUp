@@ -13,6 +13,13 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 } // 20MB
 });
 
+function getAnthropicApiKey() {
+  return process.env.ANTHROPIC_API_KEY ||
+    process.env.API_CLAUDE ||
+    process.env.CLAUDE_API_KEY ||
+    process.env['API Claude'];
+}
+
 const OVERWRITE_FIELDS = [
   'nombre', 'pais_region', 'anio_fundacion', 'segmento', 'web', 'propietario', 'motivo_venta',
   'facturacion_actual', 'facturacion_historico', 'ebitda', 'margen_ebitda', 'deuda_neta',
@@ -182,10 +189,11 @@ app.delete('/api/companies/:id', (req, res) => {
 // dejando además constancia del documento y de la acción en el historial (CRM).
 app.post('/api/companies/:id/analyze-document', upload.single('file'), async (req, res) => {
   try {
-    if (!process.env.ANTHROPIC_API_KEY) {
+    const anthropicApiKey = getAnthropicApiKey();
+    if (!anthropicApiKey) {
       return res.status(400).json({
         error: 'missing_api_key',
-        message: 'Falta configurar la variable de entorno ANTHROPIC_API_KEY en el servidor.'
+        message: 'Falta configurar la variable de entorno ANTHROPIC_API_KEY en el servidor. En Railway, el nombre de la variable debe ser ANTHROPIC_API_KEY y el valor debe ser tu API key de Anthropic.'
       });
     }
     if (!req.file) {
@@ -216,7 +224,7 @@ app.post('/api/companies/:id/analyze-document', upload.single('file'), async (re
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'x-api-key': anthropicApiKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
