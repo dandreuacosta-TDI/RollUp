@@ -4,8 +4,9 @@ Sistema de screening para ir dando de alta empresas target (envases y embalajes 
 con ficha completa: identificación, financieros, operativa, estrategia y estado del proceso.
 
 Es una app muy simple: **Node.js + Express** sirviendo una página estática y una pequeña API REST.
-Los datos se guardan en un archivo `data/companies.json`. No necesita ninguna base de datos externa.
-La interfaz autoguarda los cambios de cada ficha contra ese archivo unos instantes después de editar.
+En producción puede guardar las empresas en **PostgreSQL** usando `DATABASE_URL`. En local, si no hay
+base de datos configurada, usa `data/companies.json` como fallback. La interfaz autoguarda los cambios
+de cada ficha unos instantes después de editar.
 
 Incluye análisis automático de documentos desde el inicio del flujo: subes primero un PDF, Excel o CSV
 (teaser, CIM, cuentas anuales, informe comercial, lo que sea), la app crea una ficha provisional de la
@@ -18,12 +19,14 @@ También incluye un pequeño CRM de seguimiento por empresa: una línea de tiemp
 (llamadas, reuniones, novedades) y las entradas automáticas de cada documento analizado, más un
 campo de "próxima acción" con fecha para no perder de vista qué toca hacer con cada deal.
 
-La ficha tiene dos pestañas principales:
+La ficha tiene tres pestañas principales:
 
 - **Ficha de screening:** identificación, financieros, operativa, estrategia, documentos e histórico CRM.
 - **Plan de adquisición:** generación de un plan base con valor empresa/EV, múltiplo de la transacción,
   capital a usar, deuda de adquisición, vendor loan, earn-out, condiciones clave, riesgos de financiación
   y plan 100 días post-cierre.
+- **Cuadro de deuda:** calendario anual de devolución de deuda, intereses cash, amortización senior,
+  vendor loan, deuda final, leverage y DSCR.
 
 ### Variable de entorno necesaria para el análisis de documentos
 
@@ -58,6 +61,16 @@ En PowerShell:
 $env:PORT=3100; npm start
 ```
 
+### Persistencia de datos
+
+La app usa este orden:
+
+1. Si existe `DATABASE_URL` o `POSTGRES_URL`, guarda y lee empresas desde PostgreSQL.
+2. Si no existe base de datos configurada, usa `data/companies.json` en el disco local.
+
+Cuando actives PostgreSQL por primera vez, si existe `data/companies.json` y la tabla está vacía, el
+servidor migrará automáticamente esas empresas a la base de datos.
+
 ## Subirlo a GitHub
 
 ```bash
@@ -82,14 +95,15 @@ git push -u origin main
 3. Railway usará el `Dockerfile` incluido para construir la app con Node 20 y ejecutar `npm start`. Esto evita depender del builder automático de Railway/Railpack.
 4. En **Variables**, añade `ANTHROPIC_API_KEY` con tu clave de https://console.anthropic.com/settings/keys
    para que funcione el análisis automático de cuentas anuales.
-5. **Importante — persistencia de datos:** por defecto, el sistema de archivos de Railway se reinicia
-   en cada nuevo despliegue. Para que las empresas que vayas dando de alta no se pierdan cuando actualices
-   el código, añade un **Volume**:
-   - En el proyecto de Railway, ve a la pestaña del servicio → **Volumes** → **New Volume**.
-   - Móntalo, por ejemplo, en `/data`.
-   - Añade la variable de entorno `DATA_DIR=/data` en **Variables**.
+5. **Importante — persistencia de datos:** añade una base de datos PostgreSQL en Railway para que los
+   datos no dependan del contenedor ni de los commits:
+   - En Railway, pulsa **New → Database → PostgreSQL** dentro del proyecto.
+   - Railway añadirá automáticamente `DATABASE_URL` al entorno del servicio o te permitirá referenciarla.
    - Redeploy.
-   Sin este Volume, la app funciona, pero los datos pueden perderse al redeplegar aunque el autoguardado esté activo.
+   - Desde ese momento, las empresas se guardan en PostgreSQL y no se pierden al desplegar nuevos commits.
+
+   Alternativa si no quieres PostgreSQL: añade un **Volume** montado en `/data` y configura `DATA_DIR=/data`.
+   Esta opción mantiene el fallback JSON persistente, pero PostgreSQL es la opción recomendada.
 6. Railway te da una URL pública (algo como `tu-proyecto.up.railway.app`). Esa es tu herramienta,
    accesible desde cualquier navegador, sin pasar por Claude.
 
@@ -111,6 +125,5 @@ git push -u origin main
 - No hay login ni control de acceso — cualquiera con la URL puede ver y editar los datos.
   Si varias personas del equipo van a usarlo, considera añadir una contraseña simple (basic auth)
   antes de compartir la URL fuera del equipo.
-- Si el equipo crece o quieres histórico/auditoría de cambios, el siguiente paso natural es
-  sustituir `data/companies.json` por una base de datos real (Postgres, que Railway también
-  ofrece como plugin con un clic).
+- Para producción, usa PostgreSQL con `DATABASE_URL`. El JSON local queda solo como fallback de desarrollo
+   o como migración inicial.

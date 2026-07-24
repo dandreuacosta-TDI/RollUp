@@ -614,6 +614,90 @@
     </div>`).join('')}</div>`;
   }
 
+  function debtSchedule(model){
+    const rows = [];
+    let seniorDebt = model.seniorDebt;
+    let vendorDebt = model.vendorLoan;
+    const fcfBeforeDebt = model.fcf;
+    const seniorRate = model.seniorDebt ? ((model.bankDebt * model.bankRate) + (model.ventureDebt * model.ventureRate)) / model.seniorDebt : 0;
+    for(let year=1; year<=7; year++){
+      const openingSenior = seniorDebt;
+      const openingVendor = vendorDebt;
+      const openingTotal = openingSenior + openingVendor;
+      const cashInterest = openingSenior * seniorRate;
+      const cashAfterInterest = Math.max(fcfBeforeDebt - cashInterest, 0);
+      const seniorAmort = Math.min(openingSenior, cashAfterInterest);
+      const cashAfterSenior = Math.max(cashAfterInterest - seniorAmort, 0);
+      const vendorInterest = openingVendor * model.vendorRate;
+      const vendorWithInterest = openingVendor + vendorInterest;
+      const vendorAmort = Math.min(vendorWithInterest, cashAfterSenior);
+      seniorDebt = Math.max(openingSenior - seniorAmort, 0);
+      vendorDebt = Math.max(vendorWithInterest - vendorAmort, 0);
+      const debtService = cashInterest + seniorAmort + vendorAmort;
+      rows.push({
+        year,
+        openingSenior,
+        openingVendor,
+        openingTotal,
+        fcfBeforeDebt,
+        cashInterest,
+        seniorAmort,
+        vendorInterest,
+        vendorAmort,
+        closingSenior: seniorDebt,
+        closingVendor: vendorDebt,
+        closingTotal: seniorDebt + vendorDebt,
+        leverage: model.ebitda ? seniorDebt / model.ebitda : 0,
+        dscr: debtService ? fcfBeforeDebt / debtService : null
+      });
+    }
+    return rows;
+  }
+
+  function renderDebtScheduleTab(){
+    const model = acquisitionModel(current, { forcePercentages:true });
+    const rows = debtSchedule(model);
+    const seniorClearYear = rows.find(r=>r.closingSenior <= 0.05)?.year;
+    const totalClearYear = rows.find(r=>r.closingTotal <= 0.05)?.year;
+    const residual = rows.length ? rows[rows.length - 1].closingTotal : 0;
+    const dscrValues = rows.map(row=>row.dscr).filter(Number.isFinite);
+    const minDscr = dscrValues.length ? Math.min(...dscrValues) : null;
+    const tableRows = rows.map(row=>`<tr>
+      <td>${row.year}</td>
+      <td class="num">${formatMoney(row.openingTotal) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.fcfBeforeDebt) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.cashInterest) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.seniorAmort) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.vendorInterest) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.vendorAmort) || '0,0'} M€</td>
+      <td class="num">${formatMoney(row.closingTotal) || '0,0'} M€</td>
+      <td class="num">${formatRatio(row.leverage)}</td>
+      <td class="num">${formatRatio(row.dscr)}</td>
+    </tr>`).join('');
+    return `
+      <div class="section">
+        <div class="stitle"><span class="num">D1</span> Cuadro de devolución de deuda</div>
+        <div class="scenario-note"><strong>Criterio de cálculo:</strong> parte del precio y porcentajes actuales. El FCF antes de deuda se estima como EBITDA × conversión a FCF. Primero se pagan intereses cash de deuda senior, después se amortiza deuda bancaria/venture y, cuando sobra caja, se amortiza vendor loan. El vendor loan acumula interés hasta amortizarse.</div>
+        <div class="deal-summary">
+          ${metric('FCF antes deuda', formatMoney(model.fcf) ? formatMoney(model.fcf) + ' M€' : '', `Conversión ${formatPct(model.fcfConversion)}`)}
+          ${metric('Deuda inicial', formatMoney(model.totalDebt) ? formatMoney(model.totalDebt) + ' M€' : '0,0 M€', 'Banco + venture + vendor')}
+          ${metric('Senior repagada', seniorClearYear ? 'Año ' + seniorClearYear : '>7 años', 'Banco + venture')}
+          ${metric('Deuda residual año 7', formatMoney(residual) + ' M€', totalClearYear ? 'Deuda total repagada año ' + totalClearYear : 'Pendiente refinanciar/negociar')}
+          ${metric('DSCR mínimo', formatRatio(minDscr), 'FCF / servicio deuda')}
+          ${metric('Leverage inicial', formatRatio(model.leverageTotal), 'Deuda total / EBITDA')}
+          ${metric('Equity cheque', formatMoney(model.equity) ? formatMoney(model.equity) + ' M€' : '', `${formatPct(model.fundingNeed ? model.equity/model.fundingNeed : 0)} de fuentes`)}
+          ${metric('Fuentes vs necesidad', model.fundingGap > 0.05 ? 'Faltan ' + formatMoney(model.fundingGap) + ' M€' : model.fundingGap < -0.05 ? 'Sobran ' + formatMoney(model.fundingGapAbs) + ' M€' : 'Cuadrado', formatMoney(model.fundingNeed) ? 'Necesidad ' + formatMoney(model.fundingNeed) + ' M€' : '')}
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Año</th><th>Deuda inicial</th><th>FCF antes deuda</th><th>Intereses cash</th><th>Amort. senior</th><th>Interés vendor</th><th>Amort. vendor</th><th>Deuda final</th><th>Senior/EBITDA</th><th>DSCR</th></tr></thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   function metric(label, value, sub){
     return `<div class="metric"><div class="mlabel">${label}</div><div class="mvalue">${escapeHtml(value || '—')}</div>${sub ? `<div class="msub">${escapeHtml(sub)}</div>` : ''}</div>`;
   }
@@ -1054,6 +1138,7 @@
       <div class="tabs">
         <button class="tabbtn ${activeTab==='screening'?'active':''}" data-tab="screening">Ficha de screening</button>
         <button class="tabbtn ${activeTab==='acquisition'?'active':''}" data-tab="acquisition">Plan de adquisición</button>
+        <button class="tabbtn ${activeTab==='debt'?'active':''}" data-tab="debt">Cuadro de deuda</button>
       </div>
 
       <div class="tab-panel ${activeTab==='screening'?'active':''}">
@@ -1203,6 +1288,9 @@
         </div>
           `;
         })()}
+      </div>
+      <div class="tab-panel ${activeTab==='debt'?'active':''}">
+        ${renderDebtScheduleTab()}
       </div>
       <div class="savebar">
         <span id="statusMsg">${dirty? 'Cambios sin guardar' : 'Guardado'}</span>

@@ -4,6 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const XLSX = require('xlsx');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
@@ -127,14 +128,72 @@ ${text}
 // DATA_DIR should point at a persistent volume in production (see README).
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'companies.json');
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+let pgPool;
+let storeReadyPromise;
 
-function ensureStore() {
+function ensureJsonStore() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify({}));
 }
 
-function readAll() {
-  ensureStore();
+function getPgPool() {
+  if (!pgPool) {
+    const needsSsl = DATABASE_URL && !DATABASE_URL.includes('localhost') && process.env.PGSSLMODE !== 'disable';
+    pgPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: needsSsl ? { rejectUnauthorized: false } : false
+    });
+  }
+  return pgPool;
+}
+
+async function ensurePostgresStore() {
+  const pool = getPgPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS companies (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  const countResult = await pool.query('SELECT COUNT(*)::int AS count FROM companies');
+  if (countResult.rows[0].count === 0 && fs.existsSync(DATA_FILE)) {
+    try {
+      const jsonData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+      const records = Object.values(jsonData).map(normalizeCompany).filter(c => c.id);
+      for (const rec of records) {
+        await pool.query(
+          'INSERT INTO companies (id, data, updated) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated = EXCLUDED.updated',
+          [rec.id, rec, rec.updated || new Date().toISOString()]
+        );
+      }
+      if (records.length) console.log(`Migradas ${records.length} empresas desde JSON a PostgreSQL.`);
+    } catch (e) {
+      console.warn('No se pudo migrar el JSON local a PostgreSQL:', e.message);
+    }
+  }
+}
+
+async function ensureStore() {
+  if (!DATABASE_URL) {
+    ensureJsonStore();
+    return;
+  }
+  if (!storeReadyPromise) storeReadyPromise = ensurePostgresStore();
+  await storeReadyPromise;
+}
+
+async function readAll() {
+  await ensureStore();
+  if (DATABASE_URL) {
+    const result = await getPgPool().query('SELECT id, data FROM companies ORDER BY updated DESC');
+    return result.rows.reduce((acc, row) => {
+      acc[row.id] = row.data;
+      return acc;
+    }, {});
+  }
   try {
     return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
   } catch (e) {
@@ -142,14 +201,36 @@ function readAll() {
   }
 }
 
-function writeAll(data) {
-  ensureStore();
+async function writeAll(data) {
+  await ensureStore();
+  if (DATABASE_URL) {
+    const pool = getPgPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM companies');
+      for (const rec of Object.values(data).map(normalizeCompany).filter(c => c.id)) {
+        await client.query(
+          'INSERT INTO companies (id, data, updated) VALUES ($1, $2, $3)',
+          [rec.id, rec, rec.updated || new Date().toISOString()]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    return;
+  }
+  ensureJsonStore();
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
 // GET /api/companies -> lightweight index for the sidebar list
-app.get('/api/companies', (req, res) => {
-  const all = readAll();
+app.get('/api/companies', async (req, res) => {
+  const all = await readAll();
   const index = Object.values(all).map(normalizeCompany).map(c => ({
     id: c.id,
     nombre: c.nombre,
@@ -161,29 +242,29 @@ app.get('/api/companies', (req, res) => {
 });
 
 // GET /api/companies/:id -> full record
-app.get('/api/companies/:id', (req, res) => {
-  const all = readAll();
+app.get('/api/companies/:id', async (req, res) => {
+  const all = await readAll();
   const rec = all[req.params.id];
   if (!rec) return res.status(404).json({ error: 'not_found' });
   res.json(normalizeCompany(rec));
 });
 
 // POST /api/companies -> create or update (upsert). Body must include "id".
-app.post('/api/companies', (req, res) => {
+app.post('/api/companies', async (req, res) => {
   const rec = normalizeCompany(req.body);
   if (!rec || !rec.id) return res.status(400).json({ error: 'missing_id' });
-  const all = readAll();
+  const all = await readAll();
   rec.updated = new Date().toISOString();
   all[rec.id] = rec;
-  writeAll(all);
+  await writeAll(all);
   res.json(rec);
 });
 
 // DELETE /api/companies/:id
-app.delete('/api/companies/:id', (req, res) => {
-  const all = readAll();
+app.delete('/api/companies/:id', async (req, res) => {
+  const all = await readAll();
   delete all[req.params.id];
-  writeAll(all);
+  await writeAll(all);
   res.json({ deleted: true });
 });
 
@@ -203,7 +284,7 @@ app.post('/api/companies/:id/analyze-document', upload.single('file'), async (re
       return res.status(400).json({ error: 'no_file', message: 'No se ha recibido ningún archivo.' });
     }
 
-    const all = readAll();
+    const all = await readAll();
     if (!all[req.params.id]) {
       return res.status(404).json({ error: 'not_found', message: 'Guarda la ficha antes de analizar documentos.' });
     }
@@ -280,7 +361,7 @@ app.post('/api/companies/:id/analyze-document', upload.single('file'), async (re
 
     rec.updated = new Date().toISOString();
     all[req.params.id] = rec;
-    writeAll(all);
+    await writeAll(all);
 
     res.json(rec);
   } catch (err) {
@@ -290,12 +371,12 @@ app.post('/api/companies/:id/analyze-document', upload.single('file'), async (re
 });
 
 // POST /api/companies/:id/activities -> añade una nota manual al histórico de seguimiento (CRM)
-app.post('/api/companies/:id/activities', (req, res) => {
+app.post('/api/companies/:id/activities', async (req, res) => {
   const { texto, fecha } = req.body || {};
   if (!texto || !texto.trim()) {
     return res.status(400).json({ error: 'missing_text', message: 'La nota no puede estar vacía.' });
   }
-  const all = readAll();
+  const all = await readAll();
   const rec = all[req.params.id];
   if (!rec) return res.status(404).json({ error: 'not_found' });
 
@@ -307,7 +388,7 @@ app.post('/api/companies/:id/activities', (req, res) => {
   });
   rec.updated = new Date().toISOString();
   all[req.params.id] = rec;
-  writeAll(all);
+  await writeAll(all);
   res.json(rec);
 });
 
