@@ -159,6 +159,7 @@
   .plan-actions .secondary-action{ background:var(--blue); }
   .plan-actions .quiet-action{ background:var(--paper); color:var(--ink); border:1px solid var(--ink); }
   .scenario-note{ border-left:4px solid var(--blue); background:#fbfbff; border-radius:0 12px 12px 0; padding:12px 14px; margin:0 0 16px; color:var(--ink-dim); font-size:12.5px; line-height:1.55; }
+  .action-notice{ width:100%; border:1px solid #cfd2ff; background:#f4f5ff; color:#34377a; border-radius:12px; padding:10px 12px; font-size:12.5px; font-weight:800; }
   .hint{ font-size:12px; color:var(--ink-dim); line-height:1.5; }
   .crm-box{ border:1px solid var(--line); border-radius:16px; background:#fff; padding:14px; box-shadow:var(--shadow-soft); }
   .crm-add{ display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
@@ -244,6 +245,7 @@
   let portfolioLoaded = false;
   let autoSaveTimer = null;
   let editVersion = 0;
+  let actionNotice = "";
 
   const app = document.getElementById('app');
   function uid(){ return 'c' + Date.now() + Math.random().toString(36).slice(2,7); }
@@ -411,17 +413,18 @@
     current = Object.assign({}, FIELD_DEFS, {id: uid()});
     activeTab = "screening";
     viewMode = "company";
+    actionNotice = "";
     dirty = true;
     render();
   }
 
   async function openPortfolio(){
     viewMode = "portfolio";
+    actionNotice = "";
+    portfolioLoaded = false;
     render();
-    if(!portfolioLoaded){
-      await loadPortfolio();
-      render();
-    }
+    await loadPortfolio();
+    render();
   }
 
   async function openCompany(id){
@@ -430,6 +433,7 @@
       current = Object.assign({}, FIELD_DEFS, rec);
       activeTab = "screening";
       viewMode = "company";
+      actionNotice = "";
       dirty = false;
       render();
     }
@@ -464,6 +468,11 @@
 
   function formatNumber(value){
     if(!Number.isFinite(value) || value <= 0) return '';
+    return value.toFixed(1).replace('.', ',');
+  }
+
+  function formatMoney(value){
+    if(!Number.isFinite(value) || value < 0) return '';
     return value.toFixed(1).replace('.', ',');
   }
 
@@ -592,14 +601,14 @@
 
   function renderInstrumentGrid(model){
     const parts = [
-      ['Equity', model.equity, model.fundingNeed ? model.equity/model.fundingNeed : 0, 'Capital propio'],
-      ['LBO deuda bancaria', model.bankDebt, model.fundingNeed ? model.bankDebt/model.fundingNeed : 0, `Interés ${formatPct(model.bankRate)}`],
-      ['Venture debt', model.ventureDebt, model.fundingNeed ? model.ventureDebt/model.fundingNeed : 0, `Bullet ${formatPct(model.ventureRate)}`],
-      ['Vendor loan', model.vendorLoan, model.fundingNeed ? model.vendorLoan/model.fundingNeed : 0, `PIK ${formatPct(model.vendorRate)}`]
+      ['Equity', model.equity, model.fundingNeed ? model.equity/model.fundingNeed : 0, 'Aportación de capital'],
+      ['Deuda bancaria', model.bankDebt, model.fundingNeed ? model.bankDebt/model.fundingNeed : 0, 'Financiación senior'],
+      ['Venture debt', model.ventureDebt, model.fundingNeed ? model.ventureDebt/model.fundingNeed : 0, 'Deuda alternativa'],
+      ['Vendor loan', model.vendorLoan, model.fundingNeed ? model.vendorLoan/model.fundingNeed : 0, 'Precio aplazado vendedor']
     ];
     return `<div class="instrument-grid">${parts.map(p=>`<div class="instrument">
       <strong>${escapeHtml(p[0])}</strong>
-      <div class="amount">${formatNumber(p[1]) || '—'} M€</div>
+      <div class="amount">${formatMoney(p[1]) || '—'} M€</div>
       <div class="msub">${formatPct(p[2])} · ${escapeHtml(p[3])}</div>
       <div class="bar"><span style="width:${clamp(p[2]*100,0,100)}%"></span></div>
     </div>`).join('')}</div>`;
@@ -749,8 +758,7 @@
     current.tesis_impacto = current.tesis_impacto || 'Encaje pendiente de validar contra la tesis de roll-up: densidad de clientes alimentarios, potencial de compras centralizadas, capacidad productiva complementaria, certificaciones y disciplina de margen.';
     current.plan_adquisicion = `Escenario manual: ${model.verdict}. Precio a financiar ${formatNumber(model.purchasePrice) || 'pendiente'} M€ y necesidad total ${formatNumber(model.fundingNeed) || 'pendiente'} M€ incluyendo fees. Fuentes totales ${formatNumber(model.totalSources) || '—'} M€ (${model.fundingGap > 0.05 ? 'faltan ' + formatNumber(model.fundingGap) + ' M€' : model.fundingGap < -0.05 ? 'sobran ' + formatNumber(model.fundingGapAbs) + ' M€' : 'cuadrado'}). Estructura: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)} y repago senior ${model.paybackYears >= 90 ? '>7 años' : model.paybackYears.toFixed(1).replace('.', ',') + ' años'}.`;
     current.plan_100_dias = current.plan_100_dias || 'Día 0-30: control de caja diario, reporting EBITDA/FCF, contratos top clientes y auditoría de certificaciones. Día 31-60: capturar sinergias de compras, pricing y logística. Día 61-100: tablero mensual de covenants, plan comercial cross-sell y quick wins de capacidad/margen.';
-    noteChanged(150);
-    renderMain();
+    finishAction('Escenario manual recalculado con los porcentajes actuales.', 'field-plan_adquisicion');
   }
 
   function applyModelToCurrent(model){
@@ -762,6 +770,21 @@
     if(!current.fees_transaccion && model.fees) current.fees_transaccion = formatNumber(model.fees);
   }
 
+  function finishAction(message, targetId){
+    actionNotice = message;
+    noteChanged(150);
+    renderMain();
+    setTimeout(()=>{
+      const target = targetId ? document.getElementById(targetId) : null;
+      if(target){
+        target.scrollIntoView({ behavior:'smooth', block:'center' });
+        if(typeof target.focus === 'function') target.focus({ preventScroll:true });
+      }
+      const msg = document.getElementById('statusMsg');
+      if(msg) msg.textContent = message;
+    }, 0);
+  }
+
   function handleOptimizeStructure(){
     if(!current.precio_acordado_vendedor && current.valor_empresa_tx) current.precio_acordado_vendedor = current.valor_empresa_tx;
     ensureScenarioInputs();
@@ -770,8 +793,7 @@
       const model = acquisitionModel(current);
       current.riesgos_financiacion = `No hay una estructura conservadora que repague con los datos actuales. Recomendación: renegociar precio, subir equity, ampliar vendor loan/earn-out o exigir más EBITDA normalizado antes de LOI. Diagnóstico actual: ${model.reasons.join(' ')}`;
       current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
-      noteChanged(150);
-      renderMain();
+      finishAction('No hay estructura cómoda con estos datos. He dejado el diagnóstico en Riesgos de financiación.', 'field-riesgos_financiacion');
       return;
     }
     current.pct_equity = best.rec.pct_equity;
@@ -784,25 +806,26 @@
     current.riesgos_financiacion = `La estructura elegida es la mejor dentro de los límites de repago configurados. Sensibilidades críticas: caída de EBITDA, menor conversión a FCF, capex de mantenimiento superior y retraso en sinergias. Si cualquiera aparece en QoE, reducir deuda bancaria/venture y desplazar precio a vendor loan o earn-out.`;
     current.plan_adquisicion = `Mejor opción automática a partir del precio acordado: precio a financiar ${formatNumber(best.model.purchasePrice)} M€ y necesidad total ${formatNumber(best.model.fundingNeed)} M€ incluyendo fees, con equity ${formatNumber(best.model.equity)} M€, deuda bancaria ${formatNumber(best.model.bankDebt)} M€, venture debt ${formatNumber(best.model.ventureDebt) || '0,0'} M€ y vendor loan ${formatNumber(best.model.vendorLoan) || '0,0'} M€. Senior leverage ${formatRatio(best.model.leverageSenior)}, total leverage ${formatRatio(best.model.leverageTotal)}, ICR ${formatRatio(best.model.icr)} y repago senior estimado ${best.model.paybackYears.toFixed(1).replace('.', ',')} años. Recomendación: avanzar a LOI condicionada a QoE, deuda neta, working capital normalizado y confirmación de FCF.`;
     current.escenario_adquisicion_guardado = buildSavedScenario(best.model);
-    noteChanged(150);
-    renderMain();
+    finishAction('Estructura ideal calculada y escenario guardado para comité.', 'field-plan_adquisicion');
   }
 
   function handleSaveScenario(){
-    const model = acquisitionModel(current);
+    ensureScenarioInputs();
+    const model = acquisitionModel(current, { forcePercentages:true });
+    applyModelToCurrent(model);
     current.escenario_adquisicion_guardado = buildSavedScenario(model);
     current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
-    noteChanged(150);
-    renderMain();
+    finishAction('Escenario recalculado y guardado para comité / LOI.', 'field-escenario_adquisicion_guardado');
   }
 
   function handleGenerateLoi(){
-    const model = acquisitionModel(current);
+    ensureScenarioInputs();
+    const model = acquisitionModel(current, { forcePercentages:true });
+    applyModelToCurrent(model);
     const today = new Date().toISOString().slice(0,10);
     current.escenario_adquisicion_guardado = current.escenario_adquisicion_guardado || buildSavedScenario(model);
     current.loi_borrador = `BORRADOR DE CARTA DE INTENCIONES NO VINCULANTE\n\nFecha: ${today}\n\nA la atención de los accionistas de ${current.nombre || '[Nombre de la sociedad]'}\n\nEstimados señores,\n\nPor medio de la presente manifestamos nuestro interés no vinculante en adquirir una participación del 100% en ${current.nombre || '[la Sociedad]'}, sociedad especializada en ${current.segmento || '[segmento de envases alimentarios]'}, sujeta a la finalización satisfactoria de due diligence financiera, fiscal, legal, laboral, operativa y comercial.\n\n1. Precio y estructura económica\nEl valor empresa indicativo acordado como base de negociación asciende a ${formatNumber(model.ev) || '[●]'} M€. La estructura propuesta contempla una combinación de recursos propios, deuda bancaria LBO, venture debt y financiación del vendedor, con el siguiente mix indicativo:\n- Equity aportado por el comprador: ${formatNumber(model.equity) || '[●]'} M€\n- Deuda bancaria de adquisición: ${formatNumber(model.bankDebt) || '[●]'} M€\n- Venture debt: ${formatNumber(model.ventureDebt) || '0,0'} M€\n- Vendor loan subordinado: ${formatNumber(model.vendorLoan) || '[●]'} M€\n\nEl precio final se ajustará euro por euro por deuda neta, caja, working capital normalizado, capex pendiente y cualquier pasivo no registrado identificado durante la due diligence.\n\n2. Vendor loan y pagos diferidos\nEl vendor loan, en su caso, será subordinado a la deuda senior, con vencimiento y calendario de amortización a pactar, devengo de intereses indicativo del ${current.tipo_vendor_loan || '5'}% anual y sujeto a covenants de información y ausencia de incumplimientos relevantes.\n\n3. Condiciones principales\nLa operación estará condicionada a: (i) confirmación de EBITDA normalizado y conversión a caja; (ii) calidad y recurrencia de ingresos; (iii) concentración de clientes; (iv) vigencia de certificaciones alimentarias; (v) validación de deuda neta, caja y working capital objetivo; (vi) ausencia de contingencias materiales; y (vii) aprobación final de financiación.\n\n4. Due diligence y exclusividad\nSolicitamos un periodo de exclusividad de 60 días naturales desde la firma de esta carta, durante el cual la Sociedad facilitará acceso razonable a información financiera, fiscal, legal, comercial, operativa y medioambiental.\n\n5. Carácter no vinculante\nSalvo las obligaciones de confidencialidad, exclusividad, costes y ley aplicable que se pacten expresamente, esta carta no constituye una oferta vinculante ni obligación de completar la transacción. Cualquier obligación definitiva quedará sujeta a la firma de un contrato de compraventa.\n\n6. Racional estratégico\nNuestra tesis se basa en ${current.tesis_impacto || current.sinergias || 'la integración de la Sociedad en una plataforma de roll-up de envases alimentarios, capturando sinergias comerciales, operativas y de compras, preservando el equipo gestor y la relación con clientes clave'}.\n\nAtentamente,\n\n[Comprador]\n[Cargo]\n`;
-    noteChanged(150);
-    renderMain();
+    finishAction('LOI generada con la estructura actual. Revisa el texto editable abajo.', 'field-loi_borrador');
   }
 
   function renderActivityBox(){
@@ -852,7 +875,7 @@
       return `<div class="section"><div class="stitle"><span class="num">P1</span> Tesis consolidada</div><div class="empty-list" style="padding:18px 0;">Cargando información completa de las empresas...</div></div>`;
     }
     const activeCompanies = portfolio.filter(c=>c.estado !== 'Descartada');
-    const models = activeCompanies.map(c=>({ company:c, model:acquisitionModel(c) }));
+    const models = activeCompanies.map(c=>({ company:c, model:acquisitionModel(c, { forcePercentages:true }) }));
     const totals = models.reduce((acc, row)=>{
       acc.ev += row.model.ev || 0;
       acc.revenue += row.model.revenue || 0;
@@ -866,6 +889,7 @@
       return acc;
     }, {ev:0,revenue:0,ebitda:0,equity:0,bankDebt:0,ventureDebt:0,vendorLoan:0,seniorDebt:0,totalDebt:0});
     const consolidatedMargin = totals.revenue ? totals.ebitda / totals.revenue : 0;
+    const consolidatedMarginLabel = totals.revenue ? `Margen ${formatPct(consolidatedMargin)}` : 'Sin facturación cargada';
     const seniorLeverage = totals.ebitda ? totals.seniorDebt / totals.ebitda : 0;
     const totalLeverage = totals.ebitda ? totals.totalDebt / totals.ebitda : 0;
     const good = models.filter(r=>r.model.level==='good').length;
@@ -888,13 +912,13 @@
           <div>
             <p>Mapa de segmentos: ${escapeHtml(segmentText)}.</p>
             <p>Semáforo de repago: ${good} financiables, ${watch} en vigilancia, ${bad} no cómodas.</p>
-            <p>Apalancamiento consolidado senior ${formatRatio(seniorLeverage)} y total ${formatRatio(totalLeverage)} sobre EBITDA agregado.</p>
+            <p>Apalancamiento consolidado senior ${formatRatio(seniorLeverage)} y total ${formatRatio(totalLeverage)} sobre EBITDA agregado. Los importes se recalculan desde los porcentajes vigentes de cada ficha.</p>
           </div>
         </div>
         <div class="deal-summary">
           ${metric('Empresas activas', String(activeCompanies.length), 'Excluye descartadas')}
           ${metric('Facturación agregada', formatNumber(totals.revenue) ? formatNumber(totals.revenue) + ' M€' : '', 'Último año')}
-          ${metric('EBITDA agregado', formatNumber(totals.ebitda) ? formatNumber(totals.ebitda) + ' M€' : '', `Margen ${formatPct(consolidatedMargin)}`)}
+          ${metric('EBITDA agregado', formatNumber(totals.ebitda) ? formatNumber(totals.ebitda) + ' M€' : '', consolidatedMarginLabel)}
           ${metric('EV agregado', formatNumber(totals.ev) ? formatNumber(totals.ev) + ' M€' : '', 'Targets con datos')}
         </div>
         ${renderInstrumentGrid({ fundingNeed: totals.equity + totals.bankDebt + totals.ventureDebt + totals.vendorLoan, equity: totals.equity, bankDebt: totals.bankDebt, ventureDebt: totals.ventureDebt, vendorLoan: totals.vendorLoan, bankRate:0.08, ventureRate:0.12, vendorRate:0.05 })}
@@ -1132,6 +1156,7 @@
             <button class="uploadbtn quiet-action" id="saveScenarioBtn">Guardar escenario</button>
             <button class="uploadbtn quiet-action" id="generateLoiBtn">Generar LOI</button>
             <span class="hint">Los porcentajes manuales se aplican literalmente. Si no suman 100%, verás déficit o exceso. La estructura ideal usa porcentajes que suman 100% y filtra por ICR, leverage y repago.</span>
+            ${actionNotice ? `<div class="action-notice">${escapeHtml(actionNotice)}</div>` : ''}
           </div>
           <div class="grid">
             ${field('precio_acordado_vendedor','Precio fijado con vendedor / EV acordado (M€)', {mono:true})}
