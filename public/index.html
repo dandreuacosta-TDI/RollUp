@@ -194,6 +194,8 @@
   let viewMode = "company";
   let portfolio = [];
   let portfolioLoaded = false;
+  let autoSaveTimer = null;
+  let editVersion = 0;
 
   const app = document.getElementById('app');
   function uid(){ return 'c' + Date.now() + Math.random().toString(36).slice(2,7); }
@@ -224,6 +226,60 @@
       body: JSON.stringify(rec)
     });
     return await r.json();
+  }
+
+  function normalizedForSave(){
+    return Object.assign({}, current, {
+      nombre: current && current.nombre && current.nombre.trim() ? current.nombre : '(sin nombre)'
+    });
+  }
+
+  function noteChanged(delay){
+    dirty = true;
+    editVersion += 1;
+    markDirty();
+    queueAutoSave(delay);
+  }
+
+  function queueAutoSave(delay){
+    if(!current || viewMode !== 'company') return;
+    clearTimeout(autoSaveTimer);
+    const msg = document.getElementById('statusMsg');
+    if(msg) msg.textContent = 'Cambios sin guardar · autoguardado pendiente';
+    autoSaveTimer = setTimeout(autoSaveCurrent, delay || 800);
+  }
+
+  async function autoSaveCurrent(){
+    if(!current || viewMode !== 'company') return;
+    const versionAtStart = editVersion;
+    const payload = normalizedForSave();
+    const msg = document.getElementById('statusMsg');
+    if(msg) msg.textContent = 'Autoguardando...';
+    try{
+      const saved = await saveCompany(payload);
+      await loadIndex();
+      if(versionAtStart === editVersion && current && current.id === saved.id){
+        current = Object.assign({}, FIELD_DEFS, saved);
+        dirty = false;
+        const okMsg = document.getElementById('statusMsg');
+        if(okMsg) okMsg.textContent = 'Guardado automático ✓';
+        const btn = document.getElementById('saveBtn');
+        if(btn) btn.classList.add('saved');
+      }
+    }catch(e){
+      const errMsg = document.getElementById('statusMsg');
+      if(errMsg) errMsg.textContent = 'No se pudo autoguardar. Usa Guardar ficha.';
+    }
+  }
+
+  function flushAutoSaveOnUnload(){
+    if(!dirty || !current || viewMode !== 'company') return;
+    const body = JSON.stringify(normalizedForSave());
+    if(navigator.sendBeacon){
+      navigator.sendBeacon('/api/companies', new Blob([body], { type:'application/json' }));
+    }else{
+      fetch('/api/companies', { method:'POST', headers:{'Content-Type':'application/json'}, body, keepalive:true });
+    }
   }
   async function deleteCompanyApi(id){
     await fetch('/api/companies/' + id, { method:'DELETE' });
@@ -610,8 +666,7 @@
     current.tesis_impacto = current.tesis_impacto || 'Encaje pendiente de validar contra la tesis de roll-up: densidad de clientes alimentarios, potencial de compras centralizadas, capacidad productiva complementaria, certificaciones y disciplina de margen.';
     current.plan_adquisicion = `Recomendación de inversión: ${model.verdict}. EV ${formatNumber(model.ev) || 'pendiente'} M€ (${formatRatio(model.multiple)} EBITDA), necesidad de financiación ${formatNumber(model.fundingNeed) || 'pendiente'} M€. Estructura: equity ${formatNumber(model.equity) || '—'} M€, deuda bancaria ${formatNumber(model.bankDebt) || '—'} M€, venture debt ${formatNumber(model.ventureDebt) || '—'} M€ y vendor loan ${formatNumber(model.vendorLoan) || '—'} M€. Senior leverage ${formatRatio(model.leverageSenior)}, total leverage ${formatRatio(model.leverageTotal)}, ICR ${formatRatio(model.icr)}. Siguiente paso: no enviar LOI hasta cerrar QoE, deuda neta, working capital y capex recurrente.`;
     current.plan_100_dias = current.plan_100_dias || 'Día 0-30: control de caja diario, reporting EBITDA/FCF, contratos top clientes y auditoría de certificaciones. Día 31-60: capturar sinergias de compras, pricing y logística. Día 61-100: tablero mensual de covenants, plan comercial cross-sell y quick wins de capacidad/margen.';
-    dirty = true;
-    markDirty();
+    noteChanged(150);
     renderMain();
   }
 
@@ -635,8 +690,7 @@
       const model = acquisitionModel(current);
       current.riesgos_financiacion = `No hay una estructura conservadora que repague con los datos actuales. Recomendación: renegociar precio, subir equity, ampliar vendor loan/earn-out o exigir más EBITDA normalizado antes de LOI. Diagnóstico actual: ${model.reasons.join(' ')}`;
       current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
-      dirty = true;
-      markDirty();
+      noteChanged(150);
       renderMain();
       return;
     }
@@ -650,8 +704,7 @@
     current.riesgos_financiacion = `La estructura elegida es la mejor dentro de los límites de repago configurados. Sensibilidades críticas: caída de EBITDA, menor conversión a FCF, capex de mantenimiento superior y retraso en sinergias. Si cualquiera aparece en QoE, reducir deuda bancaria/venture y desplazar precio a vendor loan o earn-out.`;
     current.plan_adquisicion = `Mejor opción automática a partir del precio acordado: EV ${formatNumber(best.model.ev)} M€, financiado con equity ${formatNumber(best.model.equity)} M€, deuda bancaria ${formatNumber(best.model.bankDebt)} M€, venture debt ${formatNumber(best.model.ventureDebt) || '0,0'} M€ y vendor loan ${formatNumber(best.model.vendorLoan) || '0,0'} M€. Senior leverage ${formatRatio(best.model.leverageSenior)}, total leverage ${formatRatio(best.model.leverageTotal)}, ICR ${formatRatio(best.model.icr)} y repago senior estimado ${best.model.paybackYears.toFixed(1).replace('.', ',')} años. Recomendación: avanzar a LOI condicionada a QoE, deuda neta, working capital normalizado y confirmación de FCF.`;
     current.escenario_adquisicion_guardado = buildSavedScenario(best.model);
-    dirty = true;
-    markDirty();
+    noteChanged(150);
     renderMain();
   }
 
@@ -659,8 +712,7 @@
     const model = acquisitionModel(current);
     current.escenario_adquisicion_guardado = buildSavedScenario(model);
     current.capacidad_repago = `${model.verdict}. ${model.reasons.join(' ')}`;
-    dirty = true;
-    markDirty();
+    noteChanged(150);
     renderMain();
   }
 
@@ -669,8 +721,7 @@
     const today = new Date().toISOString().slice(0,10);
     current.escenario_adquisicion_guardado = current.escenario_adquisicion_guardado || buildSavedScenario(model);
     current.loi_borrador = `BORRADOR DE CARTA DE INTENCIONES NO VINCULANTE\n\nFecha: ${today}\n\nA la atención de los accionistas de ${current.nombre || '[Nombre de la sociedad]'}\n\nEstimados señores,\n\nPor medio de la presente manifestamos nuestro interés no vinculante en adquirir una participación del 100% en ${current.nombre || '[la Sociedad]'}, sociedad especializada en ${current.segmento || '[segmento de envases alimentarios]'}, sujeta a la finalización satisfactoria de due diligence financiera, fiscal, legal, laboral, operativa y comercial.\n\n1. Precio y estructura económica\nEl valor empresa indicativo acordado como base de negociación asciende a ${formatNumber(model.ev) || '[●]'} M€. La estructura propuesta contempla una combinación de recursos propios, deuda bancaria LBO, venture debt y financiación del vendedor, con el siguiente mix indicativo:\n- Equity aportado por el comprador: ${formatNumber(model.equity) || '[●]'} M€\n- Deuda bancaria de adquisición: ${formatNumber(model.bankDebt) || '[●]'} M€\n- Venture debt: ${formatNumber(model.ventureDebt) || '0,0'} M€\n- Vendor loan subordinado: ${formatNumber(model.vendorLoan) || '[●]'} M€\n\nEl precio final se ajustará euro por euro por deuda neta, caja, working capital normalizado, capex pendiente y cualquier pasivo no registrado identificado durante la due diligence.\n\n2. Vendor loan y pagos diferidos\nEl vendor loan, en su caso, será subordinado a la deuda senior, con vencimiento y calendario de amortización a pactar, devengo de intereses indicativo del ${current.tipo_vendor_loan || '5'}% anual y sujeto a covenants de información y ausencia de incumplimientos relevantes.\n\n3. Condiciones principales\nLa operación estará condicionada a: (i) confirmación de EBITDA normalizado y conversión a caja; (ii) calidad y recurrencia de ingresos; (iii) concentración de clientes; (iv) vigencia de certificaciones alimentarias; (v) validación de deuda neta, caja y working capital objetivo; (vi) ausencia de contingencias materiales; y (vii) aprobación final de financiación.\n\n4. Due diligence y exclusividad\nSolicitamos un periodo de exclusividad de 60 días naturales desde la firma de esta carta, durante el cual la Sociedad facilitará acceso razonable a información financiera, fiscal, legal, comercial, operativa y medioambiental.\n\n5. Carácter no vinculante\nSalvo las obligaciones de confidencialidad, exclusividad, costes y ley aplicable que se pacten expresamente, esta carta no constituye una oferta vinculante ni obligación de completar la transacción. Cualquier obligación definitiva quedará sujeta a la firma de un contrato de compraventa.\n\n6. Racional estratégico\nNuestra tesis se basa en ${current.tesis_impacto || current.sinergias || 'la integración de la Sociedad en una plataforma de roll-up de envases alimentarios, capturando sinergias comerciales, operativas y de compras, preservando el equipo gestor y la relación con clientes clave'}.\n\nAtentamente,\n\n[Comprador]\n[Cargo]\n`;
-    dirty = true;
-    markDirty();
+    noteChanged(150);
     renderMain();
   }
 
@@ -983,10 +1034,10 @@
       </div>
     `;
 
-    document.getElementById('nameInput').addEventListener('input', e=>{ current.nombre=e.target.value; dirty=true; markDirty(); });
+    document.getElementById('nameInput').addEventListener('input', e=>{ current.nombre=e.target.value; noteChanged(); });
     main.querySelectorAll('[data-key]').forEach(el=>{
-      el.addEventListener('input', e=>{ current[e.target.dataset.key]=e.target.value; dirty=true; markDirty(); });
-      el.addEventListener('change', e=>{ current[e.target.dataset.key]=e.target.value; dirty=true; markDirty(); });
+      el.addEventListener('input', e=>{ current[e.target.dataset.key]=e.target.value; noteChanged(); });
+      el.addEventListener('change', e=>{ current[e.target.dataset.key]=e.target.value; noteChanged(150); });
     });
     document.getElementById('saveBtn').addEventListener('click', doSave);
     document.getElementById('delBtn').addEventListener('click', doDelete);
@@ -1018,6 +1069,7 @@
   }
 
   async function doSave(){
+    clearTimeout(autoSaveTimer);
     if(!current.nombre || !current.nombre.trim()){ current.nombre = '(sin nombre)'; }
     await saveCompany(current);
     await loadIndex();
@@ -1036,6 +1088,7 @@
   }
 
   (async function init(){
+    window.addEventListener('beforeunload', flushAutoSaveOnUnload);
     await loadIndex();
     render();
   })();

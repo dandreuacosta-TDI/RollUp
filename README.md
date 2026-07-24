@@ -5,6 +5,7 @@ con ficha completa: identificación, financieros, operativa, estrategia y estado
 
 Es una app muy simple: **Node.js + Express** sirviendo una página estática y una pequeña API REST.
 Los datos se guardan en un archivo `data/companies.json`. No necesita ninguna base de datos externa.
+La interfaz autoguarda los cambios de cada ficha contra ese archivo unos instantes después de editar.
 
 Incluye análisis automático de documentos desde el inicio del flujo: subes primero un PDF, Excel o CSV
 (teaser, CIM, cuentas anuales, informe comercial, lo que sea), la app crea una ficha provisional de la
@@ -88,6 +89,7 @@ git push -u origin main
    - Móntalo, por ejemplo, en `/data`.
    - Añade la variable de entorno `DATA_DIR=/data` en **Variables**.
    - Redeploy.
+   Sin este Volume, la app funciona, pero los datos pueden perderse al redeplegar aunque el autoguardado esté activo.
 6. Railway te da una URL pública (algo como `tu-proyecto.up.railway.app`). Esa es tu herramienta,
    accesible desde cualquier navegador, sin pasar por Claude.
 
